@@ -42,13 +42,26 @@ func run() error {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 	slog.SetDefault(log)
 
-	env, err := requireEnv("REDIS_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "TG_BOT_TOKEN", "TG_CHAT_ID")
+	env, err := requireEnv(
+		"REDIS_URL",
+		"ANTHROPIC_API_KEY",
+		"ANTHROPIC_MODEL",
+		"TG_BOT_TOKEN",
+		"TG_CHAT_ID",
+		"TG_API_ID",
+		"TG_API_HASH",
+		"TG_PHONE",
+	)
 	if err != nil {
 		return err
 	}
 	chatID, err := strconv.ParseInt(env["TG_CHAT_ID"], 10, 64)
 	if err != nil {
 		return fmt.Errorf("parse TG_CHAT_ID: %w", err)
+	}
+	apiID, err := strconv.Atoi(env["TG_API_ID"])
+	if err != nil {
+		return fmt.Errorf("parse TG_API_ID: %w", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -83,7 +96,8 @@ func run() error {
 	}
 	dedup := lane.NewDeduplicator(rdb, dedupTTL, log)
 	habr := onramp.NewHabrSource(log)
-	sources := []onramp.Source{habr}
+	mtprotoSrc := onramp.NewMTProtoSource(apiID, env["TG_API_HASH"], env["TG_PHONE"], "session.json", log)
+	sources := []onramp.Source{habr, mtprotoSrc}
 	notifier, err := exit.NewTelegramNotifier(env["TG_BOT_TOKEN"], chatID, log)
 	if err != nil {
 		return fmt.Errorf("telegram notifier: %w", err)

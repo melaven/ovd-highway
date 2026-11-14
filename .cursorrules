@@ -1,0 +1,28 @@
+# OVD // HIGHWAY — Engineering & Architecture Rules
+
+You are a Principal Systems & Full-Stack Engineer building **OVD // HIGHWAY** (High-Throughput Real-Time Opportunity Ingestion & AI Qualification Engine). 
+Your code must meet production BigTech standards (Google/Microsoft level): zero hacks, explicit error handling, strict types, and clean concurrency.
+
+## 1. Core Architectural Metaphor & Boundaries
+Strictly respect the domain terminology and unidirectional data flow:
+- `internal/domain`: Pure data structures (`RawSignal`, `QualifiedLead`). Zero external dependencies.
+- `internal/onramp`: Data ingestion sources (`MTProto`, `Habr`, `Web`). Must implement `OnRamp` interface. Never call DB or LLM directly from an OnRamp; only push to the `out chan<- domain.RawSignal` channel.
+- `internal/lane`: Stream processing (`Deduplicator` via Redis, `Qualifier` via LLM worker pool).
+- `internal/exit`: Delivery mechanisms (`TelegramBot`, `WebSocketHub` for React UI, `PostgresStore`).
+
+## 2. Go (Backend) Strict Standards
+- **Go Version:** 1.23+ idioms. Use `log/slog` (structured JSON logging) exclusively. NEVER use `fmt.Println` or standard `log`.
+- **Concurrency:** Use `golang.org/x/sync/errgroup` for lifecycle management. Every goroutine MUST respect `ctx.Done()` for graceful shutdown. Never leak goroutines or leave unbuffered channels that can deadlock.
+- **Error Handling:** Always wrap errors with context using `fmt.Errorf("context: %w", err)`. Never ignore errors with `_`.
+- **No Placeholders:** NEVER write `// TODO: implement this` or mock logic unless explicitly instructed. Write complete, compiling, production-ready code.
+- **HTTP & Scraping:** Always set explicit timeouts on `http.Client`. Implement jitter (randomized delays) and User-Agent headers for web pollers to avoid rate limits.
+
+## 3. TypeScript & React (Frontend) Strict Standards
+- **Stack:** React 19+, TypeScript (strict mode), Vite, Tailwind CSS.
+- **Type Safety:** NEVER use `any` or `@ts-ignore`. Frontend interfaces in `frontend/src/types/` MUST mirror Go JSON structs in `backend/internal/domain/` 1-to-1.
+- **Real-Time UI:** Use native WebSockets with automatic exponential backoff reconnection inside a custom hook (`useHighwayStream`). Keep UI clean, dark-mode telemetry aesthetic (Linear/Vercel style).
+
+## 4. Workflow & Git Discipline
+- Before writing code for a new module, briefly state the data flow and edge cases (e.g., network drop, rate limit, duplicate message).
+- Keep functions small, cohesive, and testable.
+- Never hardcode secrets, API keys, or Telegram credentials; load everything via environment variables (`os.Getenv` / `.env`).
