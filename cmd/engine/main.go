@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -16,8 +17,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
+	"ovd/internal/api"
 	"ovd/internal/domain"
-	"ovd/internal/exit"
 	"ovd/internal/lane"
 	"ovd/internal/onramp"
 )
@@ -47,20 +48,15 @@ func run() error {
 
 	env, err := requireEnv(
 		"REDIS_URL",
-		"ANTHROPIC_API_KEY",
-		"ANTHROPIC_MODEL",
-		"TG_BOT_TOKEN",
-		"TG_CHAT_ID",
+		"LLM_API_KEY",
+		"LLM_BASE_URL",
+		"LLM_MODEL",
 		"TG_API_ID",
 		"TG_API_HASH",
 		"TG_PHONE",
 	)
 	if err != nil {
 		return err
-	}
-	chatID, err := strconv.ParseInt(env["TG_CHAT_ID"], 10, 64)
-	if err != nil {
-		return fmt.Errorf("parse TG_CHAT_ID: %w", err)
 	}
 	apiID, err := strconv.Atoi(env["TG_API_ID"])
 	if err != nil {
@@ -89,9 +85,9 @@ func run() error {
 		return fmt.Errorf("redis ping: %w", err)
 	}
 
-	llm, err := lane.NewAnthropicFromEnv()
+	llm, err := lane.NewOpenAICompatibleClient(env["LLM_API_KEY"], env["LLM_BASE_URL"], env["LLM_MODEL"])
 	if err != nil {
-		return fmt.Errorf("anthropic client: %w", err)
+		return fmt.Errorf("LLM client: %w", err)
 	}
 	qualifier, err := lane.NewQualifier(llm, qualifierWorkers, qualifierTimeout, log)
 	if err != nil {
@@ -101,10 +97,9 @@ func run() error {
 	habr := onramp.NewHabrSource(log)
 	mtprotoSrc := onramp.NewMTProtoSource(apiID, env["TG_API_HASH"], env["TG_PHONE"], "session.json", log)
 	sources := []onramp.Source{habr, mtprotoSrc}
-	notifier, err := exit.NewTelegramNotifier(env["TG_BOT_TOKEN"], chatID, log)
-	if err != nil {
-		return fmt.Errorf("telegram notifier: %w", err)
-	}
+	// Telegram notifier is disabled while setting up the MTProto session:
+	// notifier, err := exit.NewTelegramNotifier(env["TG_BOT_TOKEN"], chatID, log)
+	// g.Go(func() error { return notifier.Run(gctx, leadStream) })
 
 	// Pipeline channels.
 	rawStream := make(chan domain.RawSignal, 100)
@@ -112,6 +107,40 @@ func run() error {
 	leadStream := make(chan domain.QualifiedLead, 50)
 
 	g, gctx := errgroup.WithContext(ctx)
+
+	wsHub := api.NewHub(log)
+	g.Go(func() error {
+		wsHub.Run(gctx)
+		return nil
+	})
+
+	wsAddr := os.Getenv("WS_ADDR")
+	if wsAddr == "" {
+		wsAddr = ":8080"
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		api.ServeWS(wsHub, w, r)
+	})
+	httpSrv := &http.Server{
+		Addr:              wsAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	g.Go(func() error {
+		<-gctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return httpSrv.Shutdown(shutdownCtx)
+	})
+	g.Go(func() error {
+		log.Info("ws server listening", "addr", wsAddr)
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("ws server: %w", err)
+		}
+		return nil
+	})
+
 	for _, source := range sources {
 		source := source
 		g.Go(func() error {
@@ -120,7 +149,22 @@ func run() error {
 	}
 	g.Go(stage(dedupStream, func() error { return dedup.Run(gctx, rawStream, dedupStream) }))
 	g.Go(stage(leadStream, func() error { return qualifier.Run(gctx, dedupStream, leadStream) }))
-	g.Go(func() error { return notifier.Run(gctx, leadStream) })
+	g.Go(func() error {
+		for {
+			select {
+			case <-gctx.Done():
+				return nil
+			case lead, ok := <-leadStream:
+				if !ok {
+					return nil
+				}
+				if lead.Qualification.IsRelevant && lead.Qualification.Score >= 7 {
+					wsHub.Broadcast(lead)
+				}
+				log.Debug("lead dispatched", "score", lead.Qualification.Score)
+			}
+		}
+	})
 
 	log.Info("highway started")
 	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {

@@ -74,7 +74,7 @@ func (q *Qualifier) worker(ctx context.Context, id int, in <-chan domain.RawSign
 				log.Error("qualify failed, signal dropped", "signal_id", sig.ID, "source", sig.Source, "err", err)
 				continue
 			}
-			if !qual.IsRelevant {
+			if !qual.IsRelevant || qual.Score < minProposal {
 				log.Debug("signal rejected", "signal_id", sig.ID, "score", qual.Score)
 				continue
 			}
@@ -160,6 +160,9 @@ func normalize(qual domain.Qualification) domain.Qualification {
 	}
 	if strings.TrimSpace(qual.EstimatedBudget) == "" {
 		qual.EstimatedBudget = "Не указан"
+	}
+	if qual.TechStack == nil {
+		qual.TechStack = []string{}
 	}
 	return qual
 }

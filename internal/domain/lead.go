@@ -11,11 +11,12 @@ type RawSignal struct {
 }
 
 type Qualification struct {
-	IsRelevant      bool   `json:"is_relevant"`
-	Score           int    `json:"score"`
-	EstimatedBudget string `json:"estimated_budget"`
-	PainPoints      string `json:"pain_points"`
-	DraftProposal   string `json:"draft_proposal"`
+	IsRelevant      bool     `json:"is_relevant"`
+	Score           int      `json:"score"`
+	EstimatedBudget string   `json:"estimated_budget"`
+	PainPoints      string   `json:"pain_points"`
+	DraftProposal   string   `json:"draft_proposal"`
+	TechStack       []string `json:"tech_stack"`
 }
 
 type QualifiedLead struct {

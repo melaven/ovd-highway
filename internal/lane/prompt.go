@@ -22,7 +22,7 @@ const systemPrompt = `Ты — Senior Systems Architect и инженер по B
 - Язык: русский.
 
 ФОРМАТ ОТВЕТА: строго один JSON-объект, без markdown, тегов и комментариев:
-{"is_relevant": boolean, "score": integer 1-10 (10 = идеально под стек и B2B), "estimated_budget": string (из текста или "Не указан"), "pain_points": string (одно предложение: реальная бизнес-боль клиента), "draft_proposal": string (отклик или пустая строка)}`
+{"is_relevant": boolean, "score": integer 1-10 (10 = идеально под стек и B2B), "estimated_budget": string (из текста или "Не указан"), "pain_points": string (одно предложение: реальная бизнес-боль клиента), "draft_proposal": string (отклик или пустая строка), "tech_stack": ["Go", "PostgreSQL", ...] (до 6 канонических названий технологий из текста заказа, пустой массив [] если не указаны)}`
 
 func userMessage(text string) string {
 	return "<order>\n" + text + "\n</order>"
