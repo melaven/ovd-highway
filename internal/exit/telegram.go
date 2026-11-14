@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	sendTimeout   = 15 * time.Second
+	sendTimeout   = 10 * time.Second
 	drainTimeout  = 10 * time.Second
 	maxDraftRunes = 2500 // keeps the whole message under Telegram's 4096 limit
 )
@@ -98,6 +98,9 @@ func formatLead(l domain.QualifiedLead) string {
 	fmt.Fprintf(&sb, "📡 Источник: %s\n", html.EscapeString(l.Signal.Source))
 	fmt.Fprintf(&sb, "💰 Бюджет: %s\n", html.EscapeString(q.EstimatedBudget))
 	fmt.Fprintf(&sb, "🔥 Боль: %s\n", html.EscapeString(q.PainPoints))
+	if len(q.TechStack) > 0 {
+		fmt.Fprintf(&sb, "🧩 Стек: %s\n", html.EscapeString(strings.Join(q.TechStack, ", ")))
+	}
 	fmt.Fprintf(&sb, "🔗 <a href=\"%s\">Открыть заказ</a>", html.EscapeString(l.Signal.URL))
 	if q.DraftProposal != "" {
 		fmt.Fprintf(&sb, "\n\n<code>%s</code>", html.EscapeString(truncateRunes(q.DraftProposal, maxDraftRunes)))

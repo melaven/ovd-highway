@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -25,62 +26,77 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("llm http status %d: %s", e.Code, e.Body)
 }
 
-type AnthropicClient struct {
-	http   *http.Client
-	apiKey string
-	model  string
+type OpenAICompatibleClient struct {
+	http     *http.Client
+	apiKey   string
+	model    string
+	endpoint string
 }
 
-func NewAnthropicFromEnv() (*AnthropicClient, error) {
-	key := os.Getenv("ANTHROPIC_API_KEY")
-	model := os.Getenv("ANTHROPIC_MODEL")
-	if key == "" || model == "" {
-		return nil, errors.New("ANTHROPIC_API_KEY and ANTHROPIC_MODEL must be set")
+func NewOpenAICompatibleClient(apiKey, baseURL, model string) (*OpenAICompatibleClient, error) {
+	if apiKey == "" || baseURL == "" || model == "" {
+		return nil, errors.New("LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL must be set")
 	}
-	return &AnthropicClient{
-		http:   &http.Client{Timeout: 60 * time.Second},
-		apiKey: key,
-		model:  model,
+
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse LLM_BASE_URL: %w", err)
+	}
+	if (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" ||
+		base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+		return nil, errors.New("LLM_BASE_URL must be an http(s) URL without user info, query, or fragment")
+	}
+
+	endpoint := strings.TrimRight(baseURL, "/")
+	if !strings.HasSuffix(endpoint, "/chat/completions") {
+		endpoint += "/chat/completions"
+	}
+	return &OpenAICompatibleClient{
+		http:     &http.Client{Timeout: 60 * time.Second},
+		apiKey:   apiKey,
+		model:    model,
+		endpoint: endpoint,
 	}, nil
 }
 
-type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system"`
-	Messages  []anthropicMessage `json:"messages"`
+type openAIRequest struct {
+	Model     string          `json:"model"`
+	MaxTokens int             `json:"max_tokens"`
+	Messages  []openAIMessage `json:"messages"`
 }
 
-type anthropicMessage struct {
+type openAIMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-type anthropicResponse struct {
-	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
+type openAIResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
 }
 
-func (c *AnthropicClient) Complete(ctx context.Context, system, user string) (string, error) {
-	payload, err := json.Marshal(anthropicRequest{
+func (c *OpenAICompatibleClient) Complete(ctx context.Context, system, user string) (string, error) {
+	payload, err := json.Marshal(openAIRequest{
 		Model:     c.model,
 		MaxTokens: 1500,
-		System:    system,
-		Messages:  []anthropicMessage{{Role: "user", Content: user}},
+		Messages: []openAIMessage{
+			{Role: "system", Content: system},
+			{Role: "user", Content: user},
+		},
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.anthropic.com/v1/messages", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("content-type", "application/json")
-	req.Header.Set("x-api-key", c.apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -92,18 +108,16 @@ func (c *AnthropicClient) Complete(ctx context.Context, system, user string) (st
 	if err != nil {
 		return "", fmt.Errorf("read response: %w", err)
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return "", &StatusError{Code: resp.StatusCode, Body: string(body)}
 	}
 
-	var out anthropicResponse
+	var out openAIResponse
 	if err := json.Unmarshal(body, &out); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
 	}
-	for _, b := range out.Content {
-		if b.Type == "text" {
-			return b.Text, nil
-		}
+	if len(out.Choices) == 0 || strings.TrimSpace(out.Choices[0].Message.Content) == "" {
+		return "", errors.New("llm response has no message content")
 	}
-	return "", errors.New("llm response has no text block")
+	return out.Choices[0].Message.Content, nil
 }
