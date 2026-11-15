@@ -88,6 +88,7 @@ func (h *HabrSource) poll(ctx context.Context, out chan<- domain.RawSignal) {
 			URL:        "https://freelance.habr.com" + path,
 			Text:       fmt.Sprintf("%s\nБюджет: %s", title, price),
 			ReceivedAt: time.Now().UTC(),
+			JobType:    "freelance",
 		}
 
 		select {

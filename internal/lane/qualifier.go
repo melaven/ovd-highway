@@ -78,7 +78,12 @@ func (q *Qualifier) worker(ctx context.Context, id int, in <-chan domain.RawSign
 				log.Debug("signal rejected", "signal_id", sig.ID, "score", qual.Score)
 				continue
 			}
-			lead := domain.QualifiedLead{Signal: sig, Qualification: qual, QualifiedAt: time.Now().UTC()}
+			jobType := sig.JobType
+			switch qual.DetectedJobType {
+			case "freelance", "vacancy":
+				jobType = qual.DetectedJobType
+			}
+			lead := domain.QualifiedLead{Signal: sig, Qualification: qual, QualifiedAt: time.Now().UTC(), JobType: jobType}
 			select {
 			case out <- lead:
 			case <-ctx.Done():
@@ -94,7 +99,7 @@ func (q *Qualifier) qualify(ctx context.Context, sig domain.RawSignal) (domain.Q
 	var raw string
 	var err error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		raw, err = q.callOnce(ctx, text)
+		raw, err = q.callOnce(ctx, text, sig.JobType)
 		if err == nil {
 			break
 		}
@@ -114,13 +119,20 @@ func (q *Qualifier) qualify(ctx context.Context, sig domain.RawSignal) (domain.Q
 	if err != nil {
 		return domain.Qualification{}, fmt.Errorf("parse llm output: %w", err)
 	}
-	return normalize(qual), nil
+	qual = normalize(qual)
+	if qual.DetectedJobType == "other" {
+		// Garbage (CVs, course ads, spam): drop silently before it reaches WS.
+		qual.IsRelevant = false
+		qual.Score = 0
+		qual.DraftProposal = ""
+	}
+	return qual, nil
 }
 
-func (q *Qualifier) callOnce(ctx context.Context, text string) (string, error) {
+func (q *Qualifier) callOnce(ctx context.Context, text, jobType string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, q.timeout)
 	defer cancel()
-	return q.llm.Complete(ctx, systemPrompt, userMessage(text))
+	return q.llm.Complete(ctx, systemPrompt, userMessage(text, jobType))
 }
 
 func isRetryable(err error) bool {

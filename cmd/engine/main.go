@@ -54,6 +54,8 @@ func run() error {
 		"TG_API_ID",
 		"TG_API_HASH",
 		"TG_PHONE",
+		"CONTROL_BOT_TOKEN",
+		"ADMIN_TG_ID",
 	)
 	if err != nil {
 		return err
@@ -61,6 +63,10 @@ func run() error {
 	apiID, err := strconv.Atoi(env["TG_API_ID"])
 	if err != nil {
 		return fmt.Errorf("parse TG_API_ID: %w", err)
+	}
+	adminID, err := strconv.ParseInt(env["ADMIN_TG_ID"], 10, 64)
+	if err != nil {
+		return fmt.Errorf("parse ADMIN_TG_ID: %w", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -96,7 +102,14 @@ func run() error {
 	dedup := lane.NewDeduplicator(rdb, dedupTTL, log)
 	habr := onramp.NewHabrSource(log)
 	mtprotoSrc := onramp.NewMTProtoSource(apiID, env["TG_API_HASH"], env["TG_PHONE"], "session.json", log)
+	controlBot, err := onramp.NewControlBot(env["CONTROL_BOT_TOKEN"], adminID, mtprotoSrc, log)
+	if err != nil {
+		return fmt.Errorf("control bot: %w", err)
+	}
 	sources := []onramp.Source{habr, mtprotoSrc}
+	if os.Getenv("MOCK_ONRAMP") == "1" {
+		sources = append(sources, onramp.NewMockSource(log))
+	}
 	// Telegram notifier is disabled while setting up the MTProto session:
 	// notifier, err := exit.NewTelegramNotifier(env["TG_BOT_TOKEN"], chatID, log)
 	// g.Go(func() error { return notifier.Run(gctx, leadStream) })
@@ -147,6 +160,10 @@ func run() error {
 			return source.Start(gctx, rawStream)
 		})
 	}
+	g.Go(func() error {
+		controlBot.Run(gctx)
+		return nil
+	})
 	g.Go(stage(dedupStream, func() error { return dedup.Run(gctx, rawStream, dedupStream) }))
 	g.Go(stage(leadStream, func() error { return qualifier.Run(gctx, dedupStream, leadStream) }))
 	g.Go(func() error {

@@ -28,6 +28,7 @@ export interface QualifiedLead {
   tech_stack: string[];
   pain_summary: string;
   draft_proposal: string;
+  job_type?: 'freelance' | 'vacancy' | string;
 }
 
 const SEED_LEADS: QualifiedLead[] = [
@@ -45,7 +46,8 @@ const SEED_LEADS: QualifiedLead[] = [
     is_relevant: true,
     tech_stack: ['Go', 'Redis', 'PostgreSQL', 'Docker'],
     pain_summary: 'Миграция узкого места с Python на Go с гарантией идемпотентности при 4k RPS.',
-    draft_proposal: 'Привет! Недавно собирал аналогичный неблокирующий конвейер на Go (errgroup + буферизованные каналы) с дедупликацией в Redis за доли миллисекунды. Готов показать архитектуру в коде и подключиться к миграции на этой неделе.'
+    draft_proposal: 'Привет! Недавно собирал аналогичный неблокирующий конвейер на Go (errgroup + буферизованные каналы) с дедупликацией в Redis за доли миллисекунды. Готов показать архитектуру в коде и подключиться к миграции на этой неделе.',
+    job_type: 'freelance',
   },
   {
     id: 'sig-902',
@@ -61,7 +63,8 @@ const SEED_LEADS: QualifiedLead[] = [
     is_relevant: true,
     tech_stack: ['Go', 'WebSockets', 'React', 'TypeScript'],
     pain_summary: 'Нужна связка Go WebSocket-хаба и реактивного интерфейса реального времени.',
-    draft_proposal: 'Добрый день. Специализируюсь ровно на стыке системного бэкенда (Go/FastAPI) и реактивных консолей на TypeScript. Могу развернуть прототип со стримингом и кольцевым буфером истории за пару дней — давайте обсудим контракты API.'
+    draft_proposal: 'Добрый день. Специализируюсь ровно на стыке системного бэкенда (Go/FastAPI) и реактивных консолей на TypeScript. Могу развернуть прототип со стримингом и кольцевым буфером истории за пару дней — давайте обсудим контракты API.',
+    job_type: 'freelance',
   },
   {
     id: 'sig-903',
@@ -77,7 +80,8 @@ const SEED_LEADS: QualifiedLead[] = [
     is_relevant: true,
     tech_stack: ['MTProto', 'Go', 'LLM API', 'PostgreSQL'],
     pain_summary: 'Прямой перехват трафика чатов по MTProto с фильтрацией кросс-постинга.',
-    draft_proposal: 'Приветствую! У меня уже реализован промышленный движок на Go + gotd/td (MTProto) с SHA-256 дедупликацией и автоматической квалификацией через LLM. Адаптирую решение под ваши 40 чатов и свяжу с CRM в кратчайшие сроки.'
+    draft_proposal: 'Приветствую! У меня уже реализован промышленный движок на Go + gotd/td (MTProto) с SHA-256 дедупликацией и автоматической квалификацией через LLM. Адаптирую решение под ваши 40 чатов и свяжу с CRM в кратчайшие сроки.',
+    job_type: 'freelance',
   },
   {
     id: 'sig-904',
@@ -93,7 +97,8 @@ const SEED_LEADS: QualifiedLead[] = [
     is_relevant: true,
     tech_stack: ['PostgreSQL', 'Supabase RLS', 'JSONB'],
     pain_summary: 'Аудит изоляции тенантов RLS и ускорение тяжелых JSONB-запросов.',
-    draft_proposal: 'Здравствуйте. Плотно работал с Multi-tenant архитектурой на PostgreSQL + Supabase RLS и оптимизацией индексов по JSONB в собственном B2B-продукте. Готов провести ревью схем и планов запросов.'
+    draft_proposal: 'Здравствуйте. Плотно работал с Multi-tenant архитектурой на PostgreSQL + Supabase RLS и оптимизацией индексов по JSONB в собственном B2B-продукте. Готов провести ревью схем и планов запросов.',
+    job_type: 'vacancy',
   }
 ];
 
@@ -105,6 +110,7 @@ interface RawQualifiedLead {
     url?: string;
     text?: string;
     received_at?: string;
+    job_type?: string;
   };
   qualification: {
     is_relevant?: boolean;
@@ -115,6 +121,7 @@ interface RawQualifiedLead {
     tech_stack?: string[];
   };
   tech_stack?: string[];
+  job_type?: string;
   qualified_at?: string;
 }
 
@@ -160,6 +167,7 @@ function normalizeRawLead(raw: RawQualifiedLead): QualifiedLead {
         : [],
     pain_summary: String(qual.pain_points ?? ''),
     draft_proposal: String(qual.draft_proposal ?? ''),
+    job_type: String(raw.job_type ?? sig.job_type ?? ''),
   };
 }
 
@@ -440,6 +448,17 @@ export default function App() {
                     )}
                   </div>
                   <div className="mt-1 flex items-center gap-2 min-w-0">
+                    {item.job_type && (
+                      <span
+                        className={`shrink-0 px-1.5 py-0.5 rounded border font-mono text-[10px] uppercase ${
+                          item.job_type === 'vacancy'
+                            ? 'bg-sky-400/[0.08] border-sky-400/20 text-sky-300'
+                            : 'bg-emerald-400/[0.08] border-emerald-400/20 text-emerald-300'
+                        }`}
+                      >
+                        {item.job_type === 'vacancy' ? 'vac' : 'frl'}
+                      </span>
+                    )}
                     <span className="font-mono text-xs text-slate-500 truncate">
                       {item.source} · {item.origin_name} · {item.captured_at}
                     </span>
