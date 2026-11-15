@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +27,10 @@ type MTProtoSource struct {
 	phone       string
 	sessionFile string
 	log         *slog.Logger
+
+	allowedMu sync.RWMutex
+	allowed   map[int64]string // channelID -> username
+	tgAPI     atomic.Pointer[tg.Client]
 }
 
 func NewMTProtoSource(apiID int, apiHash, phone, sessionFile string, log *slog.Logger) *MTProtoSource {
@@ -33,6 +40,7 @@ func NewMTProtoSource(apiID int, apiHash, phone, sessionFile string, log *slog.L
 		phone:       phone,
 		sessionFile: sessionFile,
 		log:         log.With("component", "mtproto_onramp"),
+		allowed:     make(map[int64]string),
 	}
 }
 
@@ -80,6 +88,11 @@ func (m *MTProtoSource) Start(ctx context.Context, out chan<- domain.RawSignal) 
 			return fmt.Errorf("fetch self: %w", err)
 		}
 
+		m.tgAPI.Store(client.API())
+		if err := m.resolveTargets(ctx, client.API()); err != nil {
+			return fmt.Errorf("resolve target channels: %w", err)
+		}
+
 		m.log.Info("mtproto updates listener started")
 
 		<-ctx.Done()
@@ -90,6 +103,10 @@ func (m *MTProtoSource) Start(ctx context.Context, out chan<- domain.RawSignal) 
 func (m *MTProtoSource) handleMessage(ctx context.Context, msg tg.MessageClass, out chan<- domain.RawSignal) {
 	message, ok := msg.(*tg.Message)
 	if !ok {
+		return
+	}
+
+	if !m.allowedPeer(message.GetPeerID()) {
 		return
 	}
 
@@ -104,6 +121,7 @@ func (m *MTProtoSource) handleMessage(ctx context.Context, msg tg.MessageClass, 
 		URL:        messageURL(message),
 		Text:       text,
 		ReceivedAt: time.Now().UTC(),
+		JobType:    "freelance",
 	}
 
 	select {
@@ -111,6 +129,136 @@ func (m *MTProtoSource) handleMessage(ctx context.Context, msg tg.MessageClass, 
 		m.log.Debug("signal pushed", "id", sig.ID)
 	case <-ctx.Done():
 	}
+}
+
+// allowedPeer reports whether the peer is a whitelisted channel.
+// Personal DMs (PeerUser) and basic groups (PeerChat) are always rejected.
+func (m *MTProtoSource) allowedPeer(peer tg.PeerClass) bool {
+	ch, ok := peer.(*tg.PeerChannel)
+	if !ok || ch.ChannelID == 0 {
+		return false
+	}
+	m.allowedMu.RLock()
+	defer m.allowedMu.RUnlock()
+	_, ok = m.allowed[ch.ChannelID]
+	return ok
+}
+
+// AddTarget resolves username to a channel ID and whitelists it.
+// Safe for concurrent use with the update handlers.
+func (m *MTProtoSource) AddTarget(ctx context.Context, username string) (int64, error) {
+	api := m.tgAPI.Load()
+	if api == nil {
+		return 0, fmt.Errorf("mtproto client is not ready yet")
+	}
+	return m.addTarget(ctx, api, normalizeTargetName(username))
+}
+
+func (m *MTProtoSource) addTarget(ctx context.Context, api *tg.Client, name string) (int64, error) {
+	if name == "" {
+		return 0, fmt.Errorf("empty target")
+	}
+	res, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: name})
+	if err != nil {
+		return 0, fmt.Errorf("resolve %q: %w", name, err)
+	}
+	ch, ok := res.Peer.(*tg.PeerChannel)
+	if !ok || ch.ChannelID == 0 {
+		return 0, fmt.Errorf("%q is not a channel", name)
+	}
+	m.allowedMu.Lock()
+	m.allowed[ch.ChannelID] = name
+	m.allowedMu.Unlock()
+	m.log.Info("whitelisted channel", "username", name, "channel_id", ch.ChannelID)
+	return ch.ChannelID, nil
+}
+
+// RemoveTarget resolves username and removes it from the whitelist.
+func (m *MTProtoSource) RemoveTarget(ctx context.Context, username string) (bool, error) {
+	api := m.tgAPI.Load()
+	if api == nil {
+		return false, fmt.Errorf("mtproto client is not ready yet")
+	}
+	name := normalizeTargetName(username)
+	if name == "" {
+		return false, fmt.Errorf("empty target")
+	}
+	res, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: name})
+	if err != nil {
+		return false, fmt.Errorf("resolve %q: %w", name, err)
+	}
+	ch, ok := res.Peer.(*tg.PeerChannel)
+	if !ok || ch.ChannelID == 0 {
+		return false, fmt.Errorf("%q is not a channel", name)
+	}
+	m.allowedMu.Lock()
+	_, existed := m.allowed[ch.ChannelID]
+	delete(m.allowed, ch.ChannelID)
+	m.allowedMu.Unlock()
+	return existed, nil
+}
+
+// ListTargets returns sorted usernames of all whitelisted channels.
+func (m *MTProtoSource) ListTargets() []string {
+	m.allowedMu.RLock()
+	defer m.allowedMu.RUnlock()
+	names := make([]string, 0, len(m.allowed))
+	for _, name := range m.allowed {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// resolveTargets reads TG_TARGET_CHANNELS (comma-separated usernames like
+// @freelance_ru, golang_jobs or t.me/name) and resolves them to internal
+// channel IDs via contacts.resolveUsername.
+func (m *MTProtoSource) resolveTargets(ctx context.Context, api *tg.Client) error {
+	names := parseTargetChannels(os.Getenv("TG_TARGET_CHANNELS"))
+	if len(names) == 0 {
+		m.log.Warn("TG_TARGET_CHANNELS is empty, all telegram updates will be dropped")
+		return nil
+	}
+
+	resolved := 0
+	for _, name := range names {
+		if _, err := m.addTarget(ctx, api, name); err != nil {
+			m.log.Warn("resolve target failed", "target", name, "err", err)
+			continue
+		}
+		resolved++
+	}
+
+	m.log.Info("mtproto whitelist ready", "targets", len(names), "resolved", resolved)
+	return nil
+}
+
+func parseTargetChannels(raw string) []string {
+	seen := make(map[string]struct{})
+	var names []string
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\n' || r == '\t' || r == ';'
+	}) {
+		name := normalizeTargetName(part)
+		if name == "" {
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	return names
+}
+
+func normalizeTargetName(raw string) string {
+	name := strings.ToLower(strings.TrimSpace(raw))
+	name = strings.TrimPrefix(name, "https://")
+	name = strings.TrimPrefix(name, "http://")
+	name = strings.TrimPrefix(name, "t.me/")
+	name = strings.TrimPrefix(name, "@")
+	return strings.TrimSuffix(name, "/")
 }
 
 func messageURL(msg *tg.Message) string {

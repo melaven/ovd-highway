@@ -8,6 +8,7 @@ type RawSignal struct {
 	URL        string    `json:"url"`
 	Text       string    `json:"text"`
 	ReceivedAt time.Time `json:"received_at"`
+	JobType    string    `json:"job_type"` // "freelance" | "vacancy"
 }
 
 type Qualification struct {
@@ -17,10 +18,12 @@ type Qualification struct {
 	PainPoints      string   `json:"pain_points"`
 	DraftProposal   string   `json:"draft_proposal"`
 	TechStack       []string `json:"tech_stack"`
+	DetectedJobType string   `json:"detected_job_type"` // "freelance" | "vacancy" | "other"
 }
 
 type QualifiedLead struct {
 	Signal        RawSignal     `json:"signal"`
 	Qualification Qualification `json:"qualification"`
 	QualifiedAt   time.Time     `json:"qualified_at"`
+	JobType       string        `json:"job_type"` // "freelance" | "vacancy", mirrored from Signal.JobType
 }
