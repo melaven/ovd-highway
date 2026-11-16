@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	_ "github.com/joho/godotenv/autoload"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
@@ -49,8 +50,6 @@ func run() error {
 	env, err := requireEnv(
 		"REDIS_URL",
 		"LLM_API_KEY",
-		"LLM_BASE_URL",
-		"LLM_MODEL",
 		"TG_API_ID",
 		"TG_API_HASH",
 		"TG_PHONE",
@@ -91,7 +90,16 @@ func run() error {
 		return fmt.Errorf("redis ping: %w", err)
 	}
 
-	llm, err := lane.NewOpenAICompatibleClient(env["LLM_API_KEY"], env["LLM_BASE_URL"], env["LLM_MODEL"])
+	var llm lane.Completer
+	if baseURL := os.Getenv("LLM_BASE_URL"); baseURL != "" {
+		model := os.Getenv("LLM_MODEL")
+		if model == "" {
+			model = lane.DefaultModel
+		}
+		llm, err = lane.NewOpenAICompatibleClient(env["LLM_API_KEY"], baseURL, model)
+	} else {
+		llm, err = lane.NewOpenRouterClient(env["LLM_API_KEY"], os.Getenv("LLM_MODEL"))
+	}
 	if err != nil {
 		return fmt.Errorf("LLM client: %w", err)
 	}

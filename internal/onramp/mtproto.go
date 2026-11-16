@@ -47,12 +47,18 @@ func NewMTProtoSource(apiID int, apiHash, phone, sessionFile string, log *slog.L
 func (m *MTProtoSource) Start(ctx context.Context, out chan<- domain.RawSignal) error {
 	dispatcher := tg.NewUpdateDispatcher()
 
+	dispatcher.OnBefore(func(ctx context.Context, _ tg.Entities, u tg.UpdateClass) error {
+		m.log.Info("RAW UPDATE", "type", fmt.Sprintf("%T", u))
+		return nil
+	})
+
 	dispatcher.OnNewMessage(func(ctx context.Context, _ tg.Entities, u *tg.UpdateNewMessage) error {
 		m.handleMessage(ctx, u.Message, out)
 		return nil
 	})
 
 	dispatcher.OnNewChannelMessage(func(ctx context.Context, _ tg.Entities, u *tg.UpdateNewChannelMessage) error {
+		m.log.Info("INCOMING CHANNEL EVENT", "type", fmt.Sprintf("%T", u.Message), "peer_id", peerID(u.Message))
 		m.handleMessage(ctx, u.Message, out)
 		return nil
 	})
@@ -101,6 +107,8 @@ func (m *MTProtoSource) Start(ctx context.Context, out chan<- domain.RawSignal) 
 }
 
 func (m *MTProtoSource) handleMessage(ctx context.Context, msg tg.MessageClass, out chan<- domain.RawSignal) {
+	m.log.Info("INCOMING EVENT", "type", fmt.Sprintf("%T", msg), "peer_id", peerID(msg))
+
 	message, ok := msg.(*tg.Message)
 	if !ok {
 		return
@@ -259,6 +267,13 @@ func normalizeTargetName(raw string) string {
 	name = strings.TrimPrefix(name, "t.me/")
 	name = strings.TrimPrefix(name, "@")
 	return strings.TrimSuffix(name, "/")
+}
+
+func peerID(msg tg.MessageClass) any {
+	if ne, ok := msg.AsNotEmpty(); ok {
+		return ne.GetPeerID()
+	}
+	return nil
 }
 
 func messageURL(msg *tg.Message) string {
