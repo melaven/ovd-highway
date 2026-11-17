@@ -103,11 +103,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("LLM client: %w", err)
 	}
-	qualifier, err := lane.NewQualifier(llm, qualifierWorkers, qualifierTimeout, log)
+	dedup := lane.NewDeduplicator(rdb, dedupTTL, log)
+	qualifier, err := lane.NewQualifier(llm, qualifierWorkers, qualifierTimeout, log, dedup)
 	if err != nil {
 		return fmt.Errorf("qualifier: %w", err)
 	}
-	dedup := lane.NewDeduplicator(rdb, dedupTTL, log)
 	habr := onramp.NewHabrSource(log)
 	mtprotoSrc := onramp.NewMTProtoSource(apiID, env["TG_API_HASH"], env["TG_PHONE"], "session.json", log)
 	controlBot, err := onramp.NewControlBot(env["CONTROL_BOT_TOKEN"], adminID, mtprotoSrc, log)
