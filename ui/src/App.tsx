@@ -15,7 +15,7 @@ type ConnState = 'connecting' | 'live' | 'fallback_error';
 
 export interface QualifiedLead {
   id: string;
-  source: 'mtproto' | 'habr' | 'web';
+  source: 'mtproto' | 'habr' | 'web' | 'reddit' | 'hh';
   origin_name: string;
   title: string;
   body: string;
@@ -115,9 +115,8 @@ const SCORE_FILTERS = [
 
 const SOURCE_FILTERS = [
   { label: 'All', val: 'all' },
-  { label: 'MTProto', val: 'mtproto' },
-  { label: 'Habr', val: 'habr' },
-  { label: 'Web', val: 'web' },
+  { label: 'Reddit', val: 'reddit' },
+  { label: 'HH', val: 'hh' },
 ];
 
 function scoreTextClass(score: number): string {
@@ -133,6 +132,7 @@ export default function App() {
   const [wsNonce, setWsNonce] = useState(0);
   const [minScore, setMinScore] = useState<number>(0);
   const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [filter, setFilter] = useState<'contracts' | 'jobs'>('contracts');
   const [query, setQuery] = useState<string>('');
   const [copyState, setCopyState] = useState<Record<string, 'copied' | 'error'>>({});
   const [mobileSheet, setMobileSheet] = useState(false);
@@ -221,7 +221,9 @@ export default function App() {
   };
 
   const filtered = useMemo(() => {
+    const expectedSource = filter === 'contracts' ? 'reddit' : 'hh';
     return leads.filter((item) => {
+      if (item.source !== expectedSource) return false;
       if (item.score < minScore) return false;
       if (sourceFilter !== 'all' && item.source !== sourceFilter) return false;
       if (query.trim()) {
@@ -231,7 +233,7 @@ export default function App() {
       }
       return true;
     });
-  }, [leads, minScore, sourceFilter, query]);
+  }, [leads, minScore, sourceFilter, query, filter]);
 
   const activeLead = useMemo(
     () => filtered.find((l) => l.id === selectedId) || filtered[0] || null,
@@ -248,6 +250,7 @@ export default function App() {
     setMinScore(0);
     setSourceFilter('all');
     setQuery('');
+    setFilter('contracts');
   };
 
   const copyPitch = (id: string, text: string) => {
@@ -287,6 +290,26 @@ export default function App() {
             <span>Ingested: {leads.length}</span>
             <span>Avg: {avgScore}</span>
             <span>Sources: 3</span>
+          </div>
+          <div className="flex items-center gap-1 font-mono text-xs shrink-0">
+            {(
+              [
+                ['contracts', 'Contracts'],
+                ['jobs', 'Full-Time Jobs'],
+              ] as const
+            ).map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setFilter(val)}
+                className={`px-2.5 py-1 rounded border transition-colors ${
+                  filter === val
+                    ? 'border-emerald-400/50 text-emerald-200 bg-emerald-400/10'
+                    : 'border-white/10 text-slate-500 hover:text-slate-300 hover:border-white/25'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -440,7 +463,14 @@ export default function App() {
 
         {/* Right inspector */}
         <div className="hidden lg:block lg:col-span-5 overflow-y-auto p-6 bg-black/15 select-text min-h-0">
-          {activeLead && <InspectorContent lead={activeLead} copyState={copyState[activeLead.id]} onCopy={copyPitch} />}
+          {activeLead && (
+            <InspectorContent
+              lead={activeLead}
+              filter={filter}
+              copyState={copyState[activeLead.id]}
+              onCopy={copyPitch}
+            />
+          )}
         </div>
       </main>
 
@@ -461,7 +491,12 @@ export default function App() {
                 <X className="w-4 h-4" strokeWidth={1.75} />
               </button>
             </div>
-            <InspectorContent lead={activeLead} copyState={copyState[activeLead.id]} onCopy={copyPitch} />
+            <InspectorContent
+              lead={activeLead}
+              filter={filter}
+              copyState={copyState[activeLead.id]}
+              onCopy={copyPitch}
+            />
           </div>
         </div>
       )}
@@ -471,10 +506,12 @@ export default function App() {
 
 function InspectorContent({
   lead,
+  filter,
   copyState,
   onCopy,
 }: {
   lead: QualifiedLead;
+  filter: 'contracts' | 'jobs';
   copyState?: 'copied' | 'error';
   onCopy: (id: string, text: string) => void;
 }) {
@@ -525,7 +562,7 @@ function InspectorContent({
       <section className="border-t border-white/[0.08] pt-5 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <span className="font-mono text-xs uppercase tracking-wider text-slate-500">
-            Draft Response Pitch
+            {filter === 'contracts' ? 'Draft Pitch' : 'Cover Letter'}
           </span>
           <button
             onClick={() => onCopy(lead.id, lead.draft_proposal)}
