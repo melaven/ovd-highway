@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net"
@@ -25,20 +26,32 @@ const (
 )
 
 type Qualifier struct {
-	llm     Completer
-	workers int
-	timeout time.Duration
-	log     *slog.Logger
+	llm      Completer
+	workers  int
+	timeout  time.Duration
+	log      *slog.Logger
+	releaser SignalReleaser
 }
 
-func NewQualifier(llm Completer, workers int, timeout time.Duration, log *slog.Logger) (*Qualifier, error) {
+type SignalReleaser interface {
+	Release(context.Context, domain.RawSignal) error
+}
+
+func NewQualifier(llm Completer, workers int, timeout time.Duration, log *slog.Logger, releasers ...SignalReleaser) (*Qualifier, error) {
 	if llm == nil || log == nil {
 		return nil, errors.New("qualifier: llm and logger are required")
 	}
 	if workers < 1 || timeout <= 0 {
 		return nil, errors.New("qualifier: workers must be >= 1 and timeout > 0")
 	}
-	return &Qualifier{llm: llm, workers: workers, timeout: timeout, log: log}, nil
+	if len(releasers) > 1 {
+		return nil, errors.New("qualifier: at most one signal releaser may be set")
+	}
+	q := &Qualifier{llm: llm, workers: workers, timeout: timeout, log: log}
+	if len(releasers) == 1 {
+		q.releaser = releasers[0]
+	}
+	return q, nil
 }
 
 // Run blocks until ctx is cancelled or in is closed and drained.
@@ -70,6 +83,13 @@ func (q *Qualifier) worker(ctx context.Context, id int, in <-chan domain.RawSign
 			if err != nil {
 				if ctx.Err() != nil {
 					return nil
+				}
+				if isRetryable(err) && q.releaser != nil {
+					if releaseErr := q.releaser.Release(ctx, sig); releaseErr != nil {
+						log.Error("failed to release dedup key after transient llm failure", "signal_id", sig.ID, "err", releaseErr)
+					} else {
+						log.Warn("released dedup key after transient llm failure", "signal_id", sig.ID)
+					}
 				}
 				log.Error("qualify failed, signal dropped", "signal_id", sig.ID, "source", sig.Source, "err", err)
 				continue
@@ -141,7 +161,10 @@ func isRetryable(err error) bool {
 	}
 	var se *StatusError
 	if errors.As(err, &se) {
-		return se.Code == 429 || se.Code >= 500
+		return se.Code == 429 || (se.Code >= 500 && se.Code < 600)
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
 	}
 	var ne net.Error
 	return errors.As(err, &ne)
