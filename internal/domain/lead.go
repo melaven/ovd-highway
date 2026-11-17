@@ -7,6 +7,7 @@ type RawSignal struct {
 	Source     string    `json:"source"`
 	URL        string    `json:"url"`
 	Text       string    `json:"text"`
+	Budget     string    `json:"budget,omitempty"`
 	ReceivedAt time.Time `json:"received_at"`
 	JobType    string    `json:"job_type"` // "freelance" | "vacancy"
 }
