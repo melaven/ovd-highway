@@ -22,6 +22,7 @@ import (
 	"ovd/internal/domain"
 	"ovd/internal/lane"
 	"ovd/internal/onramp"
+	"ovd/internal/store"
 )
 
 const (
@@ -49,6 +50,7 @@ func run() error {
 
 	env, err := requireEnv(
 		"REDIS_URL",
+		"DATABASE_URL",
 		"LLM_API_KEY",
 		"TG_API_ID",
 		"TG_API_HASH",
@@ -89,6 +91,16 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("redis ping: %w", err)
 	}
+
+	db, err := store.Init(ctx, env["DATABASE_URL"])
+	if err != nil {
+		return fmt.Errorf("database initialization: %w", err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Warn("database close failed", "err", err)
+		}
+	}()
 
 	var llm lane.Completer
 	if baseURL := os.Getenv("LLM_BASE_URL"); baseURL != "" {
@@ -184,6 +196,12 @@ func run() error {
 					return nil
 				}
 				if lead.Qualification.IsRelevant && lead.Qualification.Score >= 7 {
+					if err := store.SaveLead(gctx, db, lead); err != nil {
+						if gctx.Err() != nil {
+							return nil
+						}
+						return fmt.Errorf("save lead %s: %w", lead.Signal.ID, err)
+					}
 					wsHub.Broadcast(lead)
 				}
 				log.Debug("lead dispatched", "score", lead.Qualification.Score)
