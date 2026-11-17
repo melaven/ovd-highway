@@ -79,6 +79,10 @@ func (q *Qualifier) worker(ctx context.Context, id int, in <-chan domain.RawSign
 			if !ok {
 				return nil
 			}
+			if !PassesPreFilter(sig.Text) {
+				log.Debug("signal dropped by prefilter", "signal_id", sig.ID, "source", sig.Source)
+				continue
+			}
 			qual, err := q.qualify(ctx, sig)
 			if err != nil {
 				if ctx.Err() != nil {
