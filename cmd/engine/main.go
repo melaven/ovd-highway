@@ -120,13 +120,16 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("qualifier: %w", err)
 	}
-	habr := onramp.NewHabrSource(log)
 	mtprotoSrc := onramp.NewMTProtoSource(apiID, env["TG_API_HASH"], env["TG_PHONE"], "session.json", log)
 	controlBot, err := onramp.NewControlBot(env["CONTROL_BOT_TOKEN"], adminID, mtprotoSrc, log)
 	if err != nil {
 		return fmt.Errorf("control bot: %w", err)
 	}
-	sources := []onramp.Source{habr, mtprotoSrc}
+	sources := []onramp.Connector{
+		mtprotoSrc,
+		onramp.NewRedditConnector(),
+		onramp.NewHHConnector(),
+	}
 	if os.Getenv("MOCK_ONRAMP") == "1" {
 		sources = append(sources, onramp.NewMockSource(log))
 	}
@@ -177,6 +180,7 @@ func run() error {
 	for _, source := range sources {
 		source := source
 		g.Go(func() error {
+			log.Info("starting onramp connector", "connector", source.Name())
 			return source.Start(gctx, rawStream)
 		})
 	}
