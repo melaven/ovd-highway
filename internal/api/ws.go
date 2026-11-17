@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"ovd/internal/store"
 )
 
 const (
@@ -105,6 +107,20 @@ func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		hub.log.Warn("ws upgrade failed", "err", err)
+		return
+	}
+
+	leads, err := store.GetRecentLeads(r.Context(), 50)
+	if err != nil {
+		hub.log.Error("ws initial history load failed", "err", err)
+	} else if err := conn.WriteJSON(map[string]any{
+		"type":    "init",
+		"payload": leads,
+	}); err != nil {
+		hub.log.Warn("ws initial history write failed", "err", err)
+		if closeErr := conn.Close(); closeErr != nil {
+			hub.log.Warn("ws close after initial write failure failed", "err", closeErr)
+		}
 		return
 	}
 
