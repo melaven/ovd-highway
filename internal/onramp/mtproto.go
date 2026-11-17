@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -20,6 +21,17 @@ import (
 
 	"ovd/internal/domain"
 )
+
+var (
+	markdownLinkRe  = regexp.MustCompile(`\[.*?\]\((.*?)\)`)
+	invisibleCharRe = regexp.MustCompile(`[\x00-\x1F\x7F]`)
+)
+
+func SanitizeChannelInput(raw string) string {
+	cleaned := markdownLinkRe.ReplaceAllString(raw, "$1")
+	cleaned = invisibleCharRe.ReplaceAllString(cleaned, "")
+	return strings.TrimSpace(cleaned)
+}
 
 type MTProtoSource struct {
 	apiID       int
@@ -261,7 +273,7 @@ func parseTargetChannels(raw string) []string {
 }
 
 func normalizeTargetName(raw string) string {
-	name := strings.ToLower(strings.TrimSpace(raw))
+	name := strings.ToLower(SanitizeChannelInput(raw))
 	name = strings.TrimPrefix(name, "https://")
 	name = strings.TrimPrefix(name, "http://")
 	name = strings.TrimPrefix(name, "t.me/")
