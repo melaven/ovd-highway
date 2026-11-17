@@ -14,6 +14,13 @@ import (
 	"ovd/internal/domain"
 )
 
+var releaseDedupKeyScript = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+	return redis.call("DEL", KEYS[1])
+end
+return 0
+`)
+
 type Deduplicator struct {
 	rdb *redis.Client
 	ttl time.Duration
@@ -53,9 +60,18 @@ func (d *Deduplicator) Run(ctx context.Context, in <-chan domain.RawSignal, out 
 }
 
 func (d *Deduplicator) check(ctx context.Context, sig domain.RawSignal) (bool, error) {
+	return d.rdb.SetNX(ctx, dedupKey(sig), sig.ID, d.ttl).Result()
+}
+
+func (d *Deduplicator) Release(ctx context.Context, sig domain.RawSignal) error {
+	if err := releaseDedupKeyScript.Run(ctx, d.rdb, []string{dedupKey(sig)}, sig.ID).Err(); err != nil {
+		return fmt.Errorf("release dedup key: %w", err)
+	}
+	return nil
+}
+
+func dedupKey(sig domain.RawSignal) string {
 	norm := strings.Join(strings.Fields(strings.ToLower(sig.Text)), " ")
 	hash := sha256.Sum256([]byte(norm))
-	key := fmt.Sprintf("dedup:%s:%s", sig.Source, hex.EncodeToString(hash[:]))
-
-	return d.rdb.SetNX(ctx, key, sig.ID, d.ttl).Result()
+	return fmt.Sprintf("dedup:%s:%s", sig.Source, hex.EncodeToString(hash[:]))
 }
