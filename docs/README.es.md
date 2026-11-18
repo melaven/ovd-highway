@@ -1,7 +1,8 @@
-# OVD HIGHWAY 🛣️
+# OVD // HIGHWAY
 
 **Zero-Blocking Multi-Protocol Opportunity Ingestion & AI Qualification Engine**
 
+[![CI](https://github.com)](https://github.com)
 [![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go)](https://go.dev)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)](https://postgresql.org)
@@ -15,15 +16,15 @@
   <a href="./README.zh-CN.md">简体中文</a>
 </p>
 
-## 📌 Descripción general
+## Descripción general
 
-OVD HIGHWAY es un sistema multiprotocolo para la recopilación y cualificación con IA de leads desde múltiples fuentes — **Telegram (MTProto)**, **Reddit (OAuth2)** y **HeadHunter API** — junto con un panel glassmorphism en tiempo real.
+OVD HIGHWAY es un sistema multiprotocolo para la recopilación y cualificación con IA de leads desde múltiples fuentes — **Telegram (MTProto)**, **Reddit (OAuth2)** y **HeadHunter API** — junto con un telemetry workbench de alta densidad `100vh` en tiempo real.
 
 Está diseñado en torno a un **pipeline zero-blocking**: los conectores de ingesta nunca se bloquean en el procesamiento posterior, las llamadas fallidas al LLM se archivan en dead letter queue y se reintentan, y cada lead cualificado se persiste y se transmite al operador por WebSockets.
 
 ![OVD Highway Preview](./preview.png)
 
-## 🏗️ Arquitectura del sistema
+## Arquitectura del sistema
 
 ![OVD Highway Architecture](./architecture.svg)
 
@@ -33,16 +34,16 @@ Está diseñado en torno a un **pipeline zero-blocking**: los conectores de inge
 
 Diagrama completo en [`docs/architecture.svg`](./architecture.svg).
 
-## ✨ Aspectos técnicos destacados
+## Aspectos técnicos destacados
 
 - **Zero-Blocking Backpressure** — canales Go con buffer desacoplan los conectores del carril LLM; los consumidores lentos nunca bloquean la ingesta.
 - **Protocolos API oficiales** — solo clientes `net/http` limpios: Reddit `client_credentials` OAuth2 con token cacheado y renovación, HeadHunter con enrutamiento directo por ISP (`Proxy: nil`) y cabeceras oficiales `HH-User-Agent`. Sin suplantación de navegador.
 - **Circuit Breaker** (`internal/pkg/breaker`) — máquina de estados `Closed → Open → HalfOpen` con admisión de una única sonda y protección contra peticiones obsoletas, segura bajo `-race`.
 - **Pre-LLM Filter** (`internal/pipeline`) — puerta de palabras clave determinista y ligera que descarta spam y pedidos de bajo valor antes de consumir tokens de OpenRouter.
 - **Dead Letter Queue** (`internal/pipeline/dlq` + `migrations/`) — archivo en PostgreSQL para fallos del LLM (429/5xx) con idempotencia por `dedupe_key` y rollback de Redis para re-ingestar señales sin perderlas.
-- **Telemetría en tiempo real** — hub WebSocket que emite leads a una UI glassmorphism con React 19 + TypeScript.
+- **Telemetría en tiempo real** — hub WebSocket que emite leads a un telemetry workbench de alta densidad `100vh` (React 19 + TypeScript).
 
-## 📁 Estructura del repositorio
+## Estructura del repositorio
 
 ```
 ovd-highway/
@@ -57,12 +58,12 @@ ovd-highway/
 │   ├── api/             # API HTTP/WebSocket
 │   └── domain/          # Tipos compartidos (RawSignal, QualifiedLead)
 ├── migrations/          # Migraciones SQL (dead_letter_signals, ...)
-├── ui/                  # Dashboard glassmorphism React 19 + Vite + Tailwind
+├── ui/                  # Dashboard de telemetría React 19 + Vite + Tailwind
 ├── docs/                # READMEs localizados + diagrama de arquitectura
 └── .github/workflows/   # CI: tests con race detector, build linux, build ui
 ```
 
-## 🚀 Inicio rápido
+## Inicio rápido
 
 ### Backend
 
@@ -92,16 +93,16 @@ go test -race ./...
 
 GitHub Actions ejecuta los tests del backend con el race detector, compila el binario para Linux y construye la UI en cada push/PR a `main` — ver [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
 
-## 📜 Licencia
+## Licencia
 
 Este proyecto está licenciado bajo la [Licencia MIT](../LICENSE) — © 2026 Maxim Kadochnikov.
 
-## 👤 Autor
+## Autor
 
 **Maxim Kadochnikov (Melaven)** — Full-Stack & Infrastructure Engineer
 
-- 🌐 Sitio web: https://vercel.app
-- 🐙 GitHub: https://github.com
+- 🌐 Sitio web: https://melaven-dev.vercel.app/
+- 🐙 GitHub: https://github.com/melaven
 - 𝕏 X: https://x.com
 - 💬 Discord: `@melaven`
 - ✉️ Email: work.melaven@gmail.com

@@ -70,8 +70,22 @@ func (d *Deduplicator) Release(ctx context.Context, sig domain.RawSignal) error 
 	return nil
 }
 
+// MarkSeen re-arms the dedup key after a successful DLQ retry so live
+// connector traffic won't re-ingest the same signal. SetNX is used so
+// an already-present key (set by the live dedup lane) is left intact.
+func (d *Deduplicator) MarkSeen(ctx context.Context, sig domain.RawSignal) error {
+	return d.rdb.SetNX(ctx, dedupKey(sig), sig.ID, d.ttl).Err()
+}
+
 func dedupKey(sig domain.RawSignal) string {
 	norm := strings.Join(strings.Fields(strings.ToLower(sig.Text)), " ")
 	hash := sha256.Sum256([]byte(norm))
 	return fmt.Sprintf("dedup:%s:%s", sig.Source, hex.EncodeToString(hash[:]))
+}
+
+// DedupKey returns the Redis deduplication key for a signal. It is
+// exported so the DLQ can release the exact same key via its
+// DedupStore when archiving a failed signal.
+func DedupKey(sig domain.RawSignal) string {
+	return dedupKey(sig)
 }

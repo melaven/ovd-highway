@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,6 +23,7 @@ import (
 	"ovd/internal/domain"
 	"ovd/internal/lane"
 	"ovd/internal/onramp"
+	"ovd/internal/pipeline/dlq"
 	"ovd/internal/store"
 )
 
@@ -120,6 +122,22 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("qualifier: %w", err)
 	}
+
+	// Dead letter queue: archives failed LLM evaluations and releases
+	// their dedup keys so the retry worker can re-ingest them.
+	archiver, err := dlq.NewPostgresArchive(db)
+	if err != nil {
+		return fmt.Errorf("dlq archive: %w", err)
+	}
+	redisDedup, err := dlq.NewRedisDedup(rdb)
+	if err != nil {
+		return fmt.Errorf("dlq dedup: %w", err)
+	}
+	dlqManager, err := dlq.NewManager(archiver, redisDedup, dlq.Options{RetryDelay: time.Minute})
+	if err != nil {
+		return fmt.Errorf("dlq manager: %w", err)
+	}
+	qualifier.SetFailureHandler(dlqManager)
 	mtprotoSrc := onramp.NewMTProtoSource(apiID, env["TG_API_HASH"], env["TG_PHONE"], "session.json", log)
 	controlBot, err := onramp.NewControlBot(env["CONTROL_BOT_TOKEN"], adminID, mtprotoSrc, log)
 	if err != nil {
@@ -148,6 +166,48 @@ func run() error {
 	g.Go(func() error {
 		wsHub.Run(gctx)
 		return nil
+	})
+
+	// dispatchLead persists and broadcasts a qualified lead. Shared by
+	// the live leadStream consumer and the DLQ retry worker.
+	dispatchLead := func(lead domain.QualifiedLead) error {
+		if lead.Qualification.IsRelevant && lead.Qualification.Score >= 7 {
+			if err := store.SaveLead(gctx, db, lead); err != nil {
+				return fmt.Errorf("save lead %s: %w", lead.Signal.ID, err)
+			}
+			wsHub.Broadcast(lead)
+		}
+		log.Debug("lead dispatched", "score", lead.Qualification.Score)
+		return nil
+	}
+
+	// DLQ retry worker: re-evaluates archived signals synchronously via
+	// the qualifier. The worker exclusively owns row deletion (on nil)
+	// and retry_count/backoff (on error) — signals are never
+	// re-enqueued into rawStream, so backoff state cannot reset.
+	retryStore, err := dlq.NewPostgresRetryStore(db)
+	if err != nil {
+		return fmt.Errorf("dlq retry store: %w", err)
+	}
+	dlqWorker, err := dlq.NewWorker(retryStore, func(ctx context.Context, rec dlq.RetryRecord) error {
+		var sig domain.RawSignal
+		if err := json.Unmarshal(rec.Payload, &sig); err != nil {
+			return fmt.Errorf("decode dead letter payload: %w", err)
+		}
+		lead, err := qualifier.RetrySignal(ctx, sig)
+		if err != nil {
+			return err
+		}
+		if lead.QualifiedAt.IsZero() {
+			return nil // evaluated but rejected — resolve the row
+		}
+		return dispatchLead(lead)
+	}, dlq.WorkerOptions{}, log)
+	if err != nil {
+		return fmt.Errorf("dlq worker: %w", err)
+	}
+	g.Go(func() error {
+		return dlqWorker.Run(gctx)
 	})
 
 	wsAddr := os.Getenv("WS_ADDR")
@@ -188,6 +248,9 @@ func run() error {
 		controlBot.Run(gctx)
 		return nil
 	})
+	g.Go(func() error {
+		return dlqWorker.Run(gctx)
+	})
 	g.Go(stage(dedupStream, func() error { return dedup.Run(gctx, rawStream, dedupStream) }))
 	g.Go(stage(leadStream, func() error { return qualifier.Run(gctx, dedupStream, leadStream) }))
 	g.Go(func() error {
@@ -199,16 +262,12 @@ func run() error {
 				if !ok {
 					return nil
 				}
-				if lead.Qualification.IsRelevant && lead.Qualification.Score >= 7 {
-					if err := store.SaveLead(gctx, db, lead); err != nil {
-						if gctx.Err() != nil {
-							return nil
-						}
-						return fmt.Errorf("save lead %s: %w", lead.Signal.ID, err)
+				if err := dispatchLead(lead); err != nil {
+					if gctx.Err() != nil {
+						return nil
 					}
-					wsHub.Broadcast(lead)
+					return err
 				}
-				log.Debug("lead dispatched", "score", lead.Qualification.Score)
 			}
 		}
 	})

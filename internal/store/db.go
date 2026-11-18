@@ -80,6 +80,45 @@ func Init(ctx context.Context, databaseURL string) (*sql.DB, error) {
 			if closeErr != nil {
 				initErr = errors.Join(initErr, fmt.Errorf("close failed connection: %w", closeErr))
 			}
+			return
+		}
+
+		deadLetterDDL := `
+		CREATE TABLE IF NOT EXISTS dead_letter_signals (
+			id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			source        VARCHAR(100) NOT NULL,
+			raw_payload   JSONB        NOT NULL,
+			error_reason  TEXT         NOT NULL,
+			dedupe_key    VARCHAR(255),
+			retry_count   INT          NOT NULL DEFAULT 0,
+			next_retry_at TIMESTAMP WITH TIME ZONE,
+			created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		)`
+		if _, err := db.ExecContext(ctx, deadLetterDDL); err != nil {
+			closeErr := db.Close()
+			db = nil
+			initErr = fmt.Errorf("create dead_letter_signals table: %w", err)
+			if closeErr != nil {
+				initErr = errors.Join(initErr, fmt.Errorf("close failed connection: %w", closeErr))
+			}
+			return
+		}
+		if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS uq_dead_letter_signals_dedupe_key ON dead_letter_signals (dedupe_key) WHERE dedupe_key IS NOT NULL`); err != nil {
+			closeErr := db.Close()
+			db = nil
+			initErr = fmt.Errorf("create dead_letter_signals dedupe index: %w", err)
+			if closeErr != nil {
+				initErr = errors.Join(initErr, fmt.Errorf("close failed connection: %w", closeErr))
+			}
+			return
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_dead_letter_signals_next_retry ON dead_letter_signals (next_retry_at) WHERE next_retry_at IS NOT NULL`); err != nil {
+			closeErr := db.Close()
+			db = nil
+			initErr = fmt.Errorf("create dead_letter_signals retry index: %w", err)
+			if closeErr != nil {
+				initErr = errors.Join(initErr, fmt.Errorf("close failed connection: %w", closeErr))
+			}
 		}
 	})
 
