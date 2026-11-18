@@ -15,6 +15,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"ovd/internal/domain"
+	"ovd/internal/pipeline"
+	"ovd/internal/pkg/breaker"
 )
 
 const (
@@ -26,16 +28,28 @@ const (
 )
 
 type Qualifier struct {
-	llm      Completer
-	workers  int
-	timeout  time.Duration
-	log      *slog.Logger
-	releaser SignalReleaser
+	llm            Completer
+	workers        int
+	timeout        time.Duration
+	log            *slog.Logger
+	releaser       SignalReleaser
+	breaker        *breaker.Breaker
+	failureHandler FailureHandler
 }
 
 type SignalReleaser interface {
 	Release(context.Context, domain.RawSignal) error
 }
+
+// FailureHandler archives signals whose LLM evaluation failed
+// terminally or while the circuit breaker was open. *dlq.Manager
+// satisfies this interface.
+type FailureHandler interface {
+	HandleLLMFailure(ctx context.Context, source string, payload []byte, dedupeKey, errReason string) error
+}
+
+// spamFilter drops known spam/low-value signals before they reach the LLM.
+var spamFilter = pipeline.NewPreFilter()
 
 func NewQualifier(llm Completer, workers int, timeout time.Duration, log *slog.Logger, releasers ...SignalReleaser) (*Qualifier, error) {
 	if llm == nil || log == nil {
@@ -47,11 +61,31 @@ func NewQualifier(llm Completer, workers int, timeout time.Duration, log *slog.L
 	if len(releasers) > 1 {
 		return nil, errors.New("qualifier: at most one signal releaser may be set")
 	}
-	q := &Qualifier{llm: llm, workers: workers, timeout: timeout, log: log}
+	q := &Qualifier{
+		llm:     llm,
+		workers: workers,
+		timeout: timeout,
+		log:     log,
+		breaker: breaker.New(breaker.Options{}),
+	}
 	if len(releasers) == 1 {
 		q.releaser = releasers[0]
 	}
 	return q, nil
+}
+
+// SetFailureHandler wires the DLQ handler for terminal LLM failures.
+// When set, it takes precedence over the dedup SignalReleaser for
+// retryable failures because it also archives the payload.
+func (q *Qualifier) SetFailureHandler(h FailureHandler) {
+	q.failureHandler = h
+}
+
+// SetBreaker overrides the default circuit breaker (tests).
+func (q *Qualifier) SetBreaker(b *breaker.Breaker) {
+	if b != nil {
+		q.breaker = b
+	}
 }
 
 // Run blocks until ctx is cancelled or in is closed and drained.
@@ -83,12 +117,19 @@ func (q *Qualifier) worker(ctx context.Context, id int, in <-chan domain.RawSign
 				log.Debug("signal dropped by prefilter", "signal_id", sig.ID, "source", sig.Source)
 				continue
 			}
+			if ok, reason := spamFilter.Evaluate(sig.Text); !ok {
+				log.Debug("signal dropped by spam filter", "signal_id", sig.ID, "reason", reason)
+				continue
+			}
 			qual, err := q.qualify(ctx, sig)
 			if err != nil {
 				if ctx.Err() != nil {
 					return nil
 				}
-				if isRetryable(err) && q.releaser != nil {
+				transient := isRetryable(err) || errors.Is(err, breaker.ErrOpen)
+				if transient && q.failureHandler != nil {
+					q.archiveFailure(ctx, log, sig, err)
+				} else if transient && q.releaser != nil {
 					if releaseErr := q.releaser.Release(ctx, sig); releaseErr != nil {
 						log.Error("failed to release dedup key after transient llm failure", "signal_id", sig.ID, "err", releaseErr)
 					} else {
@@ -98,16 +139,11 @@ func (q *Qualifier) worker(ctx context.Context, id int, in <-chan domain.RawSign
 				log.Error("qualify failed, signal dropped", "signal_id", sig.ID, "source", sig.Source, "err", err)
 				continue
 			}
-			if !qual.IsRelevant || qual.Score < minProposal {
+			lead, ok := q.leadFrom(sig, qual)
+			if !ok {
 				log.Debug("signal rejected", "signal_id", sig.ID, "score", qual.Score)
 				continue
 			}
-			jobType := sig.JobType
-			switch qual.DetectedJobType {
-			case "freelance", "vacancy":
-				jobType = qual.DetectedJobType
-			}
-			lead := domain.QualifiedLead{Signal: sig, Qualification: qual, QualifiedAt: time.Now().UTC(), JobType: jobType}
 			select {
 			case out <- lead:
 			case <-ctx.Done():
@@ -153,10 +189,101 @@ func (q *Qualifier) qualify(ctx context.Context, sig domain.RawSignal) (domain.Q
 	return qual, nil
 }
 
+// leadFrom applies the relevance thresholds and builds the lead.
+// ok=false means the signal was evaluated but rejected.
+func (q *Qualifier) leadFrom(sig domain.RawSignal, qual domain.Qualification) (domain.QualifiedLead, bool) {
+	if !qual.IsRelevant || qual.Score < minProposal {
+		return domain.QualifiedLead{}, false
+	}
+	jobType := sig.JobType
+	switch qual.DetectedJobType {
+	case "freelance", "vacancy":
+		jobType = qual.DetectedJobType
+	}
+	return domain.QualifiedLead{Signal: sig, Qualification: qual, QualifiedAt: time.Now().UTC(), JobType: jobType}, true
+}
+
+// signalMarker is implemented by Deduplicator to re-arm dedup keys
+// after a successful DLQ retry.
+type signalMarker interface {
+	MarkSeen(context.Context, domain.RawSignal) error
+}
+
+// RetrySignal synchronously re-evaluates a dead-lettered signal: it
+// runs the same pre-filters, circuit breaker and LLM call as the live
+// worker path, then re-arms the dedup key so live traffic won't
+// duplicate it.
+//
+// It deliberately does NOT invoke the FailureHandler: the DLQ worker
+// owns retry_count/backoff and row deletion, so failures are returned
+// to it as plain errors.
+//
+// A zero QualifiedLead with nil error means the signal was evaluated
+// but rejected (or dropped by a pre-filter) — the row is resolved.
+func (q *Qualifier) RetrySignal(ctx context.Context, sig domain.RawSignal) (domain.QualifiedLead, error) {
+	log := q.log.With("signal_id", sig.ID, "retry", true)
+	if !PassesPreFilter(sig.Text) {
+		log.Debug("retry dropped by prefilter")
+		return domain.QualifiedLead{}, nil
+	}
+	if ok, reason := spamFilter.Evaluate(sig.Text); !ok {
+		log.Debug("retry dropped by spam filter", "reason", reason)
+		return domain.QualifiedLead{}, nil
+	}
+
+	qual, err := q.qualify(ctx, sig)
+	if err != nil {
+		return domain.QualifiedLead{}, err
+	}
+
+	// Evaluation succeeded: re-arm dedup so the connectors' next poll
+	// of the same post is dropped instead of duplicating this lead.
+	if marker, ok := q.releaser.(signalMarker); ok {
+		if err := marker.MarkSeen(ctx, sig); err != nil {
+			log.Warn("failed to re-arm dedup key after dlq retry", "err", err)
+		}
+	}
+
+	lead, ok := q.leadFrom(sig, qual)
+	if !ok {
+		log.Debug("retry rejected", "score", qual.Score)
+		return domain.QualifiedLead{}, nil
+	}
+	return lead, nil
+}
+
+// archiveFailure sends a failed signal to the DLQ. The DLQ releases
+// the dedup key itself after archiving, so no separate Release is needed.
+func (q *Qualifier) archiveFailure(ctx context.Context, log *slog.Logger, sig domain.RawSignal, cause error) {
+	payload, err := json.Marshal(sig)
+	if err != nil {
+		log.Error("marshal signal for dlq failed", "signal_id", sig.ID, "err", err)
+		return
+	}
+	if err := q.failureHandler.HandleLLMFailure(ctx, sig.Source, payload, DedupKey(sig), cause.Error()); err != nil {
+		log.Error("dlq handle failure failed", "signal_id", sig.ID, "err", err)
+	}
+}
+
 func (q *Qualifier) callOnce(ctx context.Context, text, jobType string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, q.timeout)
 	defer cancel()
-	return q.llm.Complete(ctx, systemPrompt, userMessage(text, jobType))
+	var raw string
+	var callErr error
+	err := q.breaker.Execute(func() error {
+		var e error
+		raw, e = q.llm.Complete(ctx, systemPrompt, userMessage(text, jobType))
+		callErr = e
+		if e != nil && !isRetryable(e) {
+			// Permanent errors (e.g. HTTP 400) must not trip the breaker.
+			return nil
+		}
+		return e
+	})
+	if err != nil {
+		return "", err
+	}
+	return raw, callErr
 }
 
 func isRetryable(err error) bool {

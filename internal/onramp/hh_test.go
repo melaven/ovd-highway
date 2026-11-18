@@ -14,8 +14,14 @@ func TestHHConnectorPoll(t *testing.T) {
 		if r.Method != http.MethodGet {
 			t.Errorf("method = %q, want GET", r.Method)
 		}
+		if got := r.Header.Get("HH-User-Agent"); got != hhUserAgent {
+			t.Errorf("HH-User-Agent = %q, want %q", got, hhUserAgent)
+		}
 		if got := r.Header.Get("User-Agent"); got != hhUserAgent {
 			t.Errorf("User-Agent = %q, want %q", got, hhUserAgent)
+		}
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Errorf("Accept = %q, want %q", got, "application/json")
 		}
 		_, _ = w.Write([]byte(`{"items":[{"name":"Go developer","alternate_url":"https://hh.ru/vacancy/1","snippet":{"requirement":"Requires <highlighttext>Go</highlighttext>","responsibility":"Build a service"},"salary":{"from":100000,"to":150000,"currency":"RUR"}}]}`))
 	}))

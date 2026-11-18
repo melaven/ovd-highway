@@ -26,3 +26,4 @@ Strictly respect the domain terminology and unidirectional data flow:
 - Before writing code for a new module, briefly state the data flow and edge cases (e.g., network drop, rate limit, duplicate message).
 - Keep functions small, cohesive, and testable.
 - Never hardcode secrets, API keys, or Telegram credentials; load everything via environment variables (`os.Getenv` / `.env`).
+- Never add Co-authored-by trailers to git commits.

@@ -1,7 +1,8 @@
-# OVD HIGHWAY 
+# OVD // HIGHWAY
 
 **Zero-Blocking Multi-Protocol Opportunity Ingestion & AI Qualification Engine**
 
+[![CI](https://github.com/melaven/ovd-highway/actions/workflows/ci.yml/badge.svg)](https://github.com/melaven/ovd-highway/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go)](https://go.dev)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)](https://postgresql.org)
@@ -17,7 +18,7 @@
 
 ## Overview
 
-OVD HIGHWAY is a multi-protocol system for collecting and AI-qualifying leads from multiple sources — **Telegram (MTProto)**, **Reddit (OAuth2)**, and **HeadHunter API** — paired with a real-time glassmorphism dashboard.
+OVD HIGHWAY is a multi-protocol system for collecting and AI-qualifying leads from multiple sources — **Telegram (MTProto)**, **Reddit (OAuth2)**, and **HeadHunter API** — paired with a real-time high-density `100vh` telemetry workbench.
 
 It is designed around a **zero-blocking pipeline**: ingestion connectors never stall on downstream processing, failed LLM calls are dead-lettered and retried, and every qualified lead is persisted and streamed to the operator UI over WebSockets.
 
@@ -40,7 +41,7 @@ See the full diagram in [`docs/architecture.svg`](./docs/architecture.svg).
 - **Circuit Breaker** (`internal/pkg/breaker`) — `Closed → Open → HalfOpen` state machine with single-probe admission and stale-request protection, safe under `-race`.
 - **Pre-LLM Filter** (`internal/pipeline`) — deterministic, allocation-light keyword gate that drops spam/low-value signals before they burn OpenRouter tokens.
 - **Dead Letter Queue** (`internal/pipeline/dlq` + `migrations/`) — PostgreSQL-backed archive for LLM failures (429/5xx) with `dedupe_key` idempotency and Redis rollback so signals are re-ingested, never silently lost.
-- **Real-time Telemetry** — WebSocket hub broadcasting leads to a React 19 + TypeScript glassmorphism UI.
+- **Real-time Telemetry** — WebSocket hub broadcasting leads to a high-density `100vh` telemetry workbench (React 19 + TypeScript).
 
 ## Repository Structure
 
@@ -100,8 +101,8 @@ This project is licensed under the [MIT License](./LICENSE) — © 2026 Maxim Ka
 
 **Maxim Kadochnikov (Melaven)** — Full-Stack & Infrastructure Engineer
 
--  Website: https://vercel.app
--  GitHub: https://github.com
-- 𝕏: https://x.com
--  Discord: `@melaven`
--  Email: work.melaven@gmail.com
+- 🌐 Website: https://melaven-dev.vercel.app/
+- 🐙 GitHub: https://github.com/melaven
+- 𝕏 X: https://x.com
+- 💬 Discord: `@melaven`
+- ✉️ Email: work.melaven@gmail.com
