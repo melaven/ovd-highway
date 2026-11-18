@@ -2,7 +2,7 @@
 
 **Zero-Blocking Multi-Protocol Opportunity Ingestion & AI Qualification Engine**
 
-[![CI](https://github.com)](https://github.com)
+[![CI](https://github.com/melaven/ovd-highway/actions/workflows/ci.yml/badge.svg)](https://github.com/melaven/ovd-highway/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go)](https://go.dev)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)](https://postgresql.org)
