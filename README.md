@@ -1,4 +1,4 @@
-# OVD HIGHWAY 🛣️
+# OVD HIGHWAY 
 
 **Zero-Blocking Multi-Protocol Opportunity Ingestion & AI Qualification Engine**
 
