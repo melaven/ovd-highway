@@ -15,7 +15,7 @@ type ConnState = 'connecting' | 'live' | 'fallback_error';
 
 export interface QualifiedLead {
   id: string;
-  source: 'mtproto' | 'habr' | 'web';
+  source: 'mtproto' | 'habr' | 'web' | 'reddit' | 'hh';
   origin_name: string;
   title: string;
   body: string;
@@ -31,77 +31,6 @@ export interface QualifiedLead {
   job_type?: 'freelance' | 'vacancy' | string;
 }
 
-const SEED_LEADS: QualifiedLead[] = [
-  {
-    id: 'sig-901',
-    source: 'mtproto',
-    origin_name: '@golang_jobs_cis',
-    title: 'Разработка высоконагруженного шлюза агрегации вебхуков (Go + Redis)',
-    body: 'Ищем системного бэкенд-инженера для переноса текущего пайплайна с Python на Go. Нагрузка около 4k RPS в пике, нужна строгая идемпотентность через Redis и прозрачные метрики задержек.',
-    author_url: 'https://t.me',
-    post_url: 'https://t.me',
-    budget: '$3,200',
-    captured_at: '2m ago',
-    score: 9,
-    is_relevant: true,
-    tech_stack: ['Go', 'Redis', 'PostgreSQL', 'Docker'],
-    pain_summary: 'Миграция узкого места с Python на Go с гарантией идемпотентности при 4k RPS.',
-    draft_proposal: 'Привет! Недавно собирал аналогичный неблокирующий конвейер на Go (errgroup + буферизованные каналы) с дедупликацией в Redis за доли миллисекунды. Готов показать архитектуру в коде и подключиться к миграции на этой неделе.',
-    job_type: 'freelance',
-  },
-  {
-    id: 'sig-902',
-    source: 'habr',
-    origin_name: 'habr.freelance',
-    title: 'Full-Stack панель телеметрии для B2B аналитического сервиса',
-    body: 'Есть готовое ядро сбора данных, требуется спроектировать WebSocket-стриминг на Go и чистый дашборд на React + TypeScript без тормозов на больших списках событий.',
-    author_url: 'https://habr.com',
-    post_url: 'https://habr.com',
-    budget: '180 000 ₽',
-    captured_at: '11m ago',
-    score: 8,
-    is_relevant: true,
-    tech_stack: ['Go', 'WebSockets', 'React', 'TypeScript'],
-    pain_summary: 'Нужна связка Go WebSocket-хаба и реактивного интерфейса реального времени.',
-    draft_proposal: 'Добрый день. Специализируюсь ровно на стыке системного бэкенда (Go/FastAPI) и реактивных консолей на TypeScript. Могу развернуть прототип со стримингом и кольцевым буфером истории за пару дней — давайте обсудим контракты API.',
-    job_type: 'freelance',
-  },
-  {
-    id: 'sig-903',
-    source: 'mtproto',
-    origin_name: '@dev_orders',
-    title: 'Интеграция кастомного парсера Telegram-каналов с CRM и скорингом лидов',
-    body: 'Нужно мониторить 40+ тематических чатов напрямую через протокол Telegram (обычный бот не подходит), отсеивать дубли и пересылать целевые заявки менеджерам.',
-    author_url: 'https://t.me',
-    post_url: 'https://t.me',
-    budget: '95 000 ₽',
-    captured_at: '24m ago',
-    score: 9,
-    is_relevant: true,
-    tech_stack: ['MTProto', 'Go', 'LLM API', 'PostgreSQL'],
-    pain_summary: 'Прямой перехват трафика чатов по MTProto с фильтрацией кросс-постинга.',
-    draft_proposal: 'Приветствую! У меня уже реализован промышленный движок на Go + gotd/td (MTProto) с SHA-256 дедупликацией и автоматической квалификацией через LLM. Адаптирую решение под ваши 40 чатов и свяжу с CRM в кратчайшие сроки.',
-    job_type: 'freelance',
-  },
-  {
-    id: 'sig-904',
-    source: 'web',
-    origin_name: 'direct.feed',
-    title: 'Оптимизация Multi-tenant схемы PostgreSQL и настройка RLS политик',
-    body: 'В растущем SaaS-проекте начались просадки по сложным выборкам JSONB и есть подозрения на некорректную изоляцию ролей в Supabase.',
-    author_url: 'https://github.com',
-    post_url: 'https://github.com',
-    budget: '$1,100',
-    captured_at: '47m ago',
-    score: 7,
-    is_relevant: true,
-    tech_stack: ['PostgreSQL', 'Supabase RLS', 'JSONB'],
-    pain_summary: 'Аудит изоляции тенантов RLS и ускорение тяжелых JSONB-запросов.',
-    draft_proposal: 'Здравствуйте. Плотно работал с Multi-tenant архитектурой на PostgreSQL + Supabase RLS и оптимизацией индексов по JSONB в собственном B2B-продукте. Готов провести ревью схем и планов запросов.',
-    job_type: 'vacancy',
-  }
-];
-
 // Raw payload shape streamed by api/ws.go: Go domain.QualifiedLead
 interface RawQualifiedLead {
   signal: {
@@ -109,6 +38,7 @@ interface RawQualifiedLead {
     source?: string;
     url?: string;
     text?: string;
+    budget?: string;
     received_at?: string;
     job_type?: string;
   };
@@ -156,7 +86,7 @@ function normalizeRawLead(raw: RawQualifiedLead): QualifiedLead {
     body: text,
     author_url: url,
     post_url: url,
-    budget: String(qual.estimated_budget ?? ''),
+    budget: String(qual.estimated_budget ?? sig.budget ?? ''),
     captured_at: formatRelativeTime(String(sig.received_at ?? raw.qualified_at ?? new Date().toISOString())),
     score: Number(qual.score ?? 0),
     is_relevant: Boolean(qual.is_relevant),
@@ -185,9 +115,8 @@ const SCORE_FILTERS = [
 
 const SOURCE_FILTERS = [
   { label: 'All', val: 'all' },
-  { label: 'MTProto', val: 'mtproto' },
-  { label: 'Habr', val: 'habr' },
-  { label: 'Web', val: 'web' },
+  { label: 'Reddit', val: 'reddit' },
+  { label: 'HH', val: 'hh' },
 ];
 
 function scoreTextClass(score: number): string {
@@ -197,12 +126,13 @@ function scoreTextClass(score: number): string {
 }
 
 export default function App() {
-  const [leads, setLeads] = useState<QualifiedLead[]>(SEED_LEADS);
-  const [selectedId, setSelectedId] = useState<string>(SEED_LEADS[0].id);
+  const [leads, setLeads] = useState<QualifiedLead[]>([]);
+  const [selectedId, setSelectedId] = useState<string>('');
   const [conn, setConn] = useState<ConnState>('connecting');
   const [wsNonce, setWsNonce] = useState(0);
   const [minScore, setMinScore] = useState<number>(0);
   const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [filter, setFilter] = useState<'contracts' | 'jobs'>('contracts');
   const [query, setQuery] = useState<string>('');
   const [copyState, setCopyState] = useState<Record<string, 'copied' | 'error'>>({});
   const [mobileSheet, setMobileSheet] = useState(false);
@@ -222,45 +152,64 @@ export default function App() {
   useEffect(() => {
     let ws: WebSocket | null = null;
     let timer: number;
+    let disposed = false;
 
     const connect = () => {
+      if (disposed) return;
       try {
         ws = new WebSocket(WS_URL);
 
-        ws.onopen = () => setConn('live');
-        ws.onclose = () => {
+        ws.onopen = () => {
+          if (!disposed) setConn('live');
+        };
+        ws.onerror = (event) => {
+          console.log('WebSocket error:', event);
+        };
+        ws.onclose = (event) => {
+          console.log('WebSocket connection closed:', event);
+          if (disposed) return;
           setConn('fallback_error');
           timer = window.setTimeout(connect, 4000);
         };
         ws.onmessage = (ev) => {
           try {
-            const msg = JSON.parse(ev.data);
-            const pushLead = (lead: QualifiedLead | null) => {
-              if (!lead) return;
-              setLeads((prev) => [lead, ...prev.filter((l) => l.id !== lead.id)].slice(0, 100));
-            };
-
-            if (msg.type === 'init' && Array.isArray(msg.payload) && msg.payload.length > 0) {
-              setLeads(msg.payload);
-              setSelectedId(msg.payload[0].id);
-            } else if (msg.type === 'lead' && msg.payload) {
-              pushLead(normalizeIncoming(msg.payload));
+            const msg: unknown = JSON.parse(ev.data);
+            if (msg && typeof msg === 'object' && 'type' in msg) {
+              const typedMsg = msg as { type?: unknown; payload?: unknown };
+              if (typedMsg.type === 'init') {
+                const payload = Array.isArray(typedMsg.payload) ? typedMsg.payload : [];
+                const incoming = payload
+                  .map(normalizeIncoming)
+                  .filter((lead): lead is QualifiedLead => lead !== null);
+                setLeads(incoming);
+                setSelectedId(incoming[0]?.id ?? '');
+              } else if (typedMsg.type === 'lead' && typedMsg.payload) {
+                const newLead = normalizeIncoming(typedMsg.payload);
+                if (newLead) {
+                  setLeads((prev) => [newLead, ...prev]);
+                  setSelectedId(newLead.id);
+                }
+              }
             } else {
-              // Raw domain.QualifiedLead from api/ws.go Broadcast().
-              pushLead(normalizeIncoming(msg));
+              const newLead = normalizeIncoming(msg);
+              if (newLead) {
+                setLeads((prev) => [newLead, ...prev]);
+                setSelectedId(newLead.id);
+              }
             }
-          } catch {
-            // ignore malformed frame
+          } catch (error) {
+            console.log('Invalid WebSocket message:', error);
           }
         };
       } catch {
-        setConn('fallback_error');
+        if (!disposed) setConn('fallback_error');
       }
     };
 
     setConn('connecting');
     connect();
     return () => {
+      disposed = true;
       clearTimeout(timer);
       ws?.close();
     };
@@ -272,7 +221,9 @@ export default function App() {
   };
 
   const filtered = useMemo(() => {
+    const expectedSource = filter === 'contracts' ? 'reddit' : 'hh';
     return leads.filter((item) => {
+      if (item.source !== expectedSource) return false;
       if (item.score < minScore) return false;
       if (sourceFilter !== 'all' && item.source !== sourceFilter) return false;
       if (query.trim()) {
@@ -282,7 +233,7 @@ export default function App() {
       }
       return true;
     });
-  }, [leads, minScore, sourceFilter, query]);
+  }, [leads, minScore, sourceFilter, query, filter]);
 
   const activeLead = useMemo(
     () => filtered.find((l) => l.id === selectedId) || filtered[0] || null,
@@ -299,6 +250,7 @@ export default function App() {
     setMinScore(0);
     setSourceFilter('all');
     setQuery('');
+    setFilter('contracts');
   };
 
   const copyPitch = (id: string, text: string) => {
@@ -317,6 +269,14 @@ export default function App() {
     );
   };
 
+  if (leads.length === 0) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-[#0d1117] text-slate-400">
+        <p className="font-mono text-sm">Awaiting signals on ws://localhost:8080/ws...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#0d1117] text-slate-200 select-none">
       {/* Top system bar */}
@@ -331,6 +291,26 @@ export default function App() {
             <span>Avg: {avgScore}</span>
             <span>Sources: 3</span>
           </div>
+          <div className="flex items-center gap-1 font-mono text-xs shrink-0">
+            {(
+              [
+                ['contracts', 'Contracts'],
+                ['jobs', 'Full-Time Jobs'],
+              ] as const
+            ).map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setFilter(val)}
+                className={`px-2.5 py-1 rounded border transition-colors ${
+                  filter === val
+                    ? 'border-emerald-400/50 text-emerald-200 bg-emerald-400/10'
+                    : 'border-white/10 text-slate-500 hover:text-slate-300 hover:border-white/25'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="flex items-center gap-2 font-mono text-xs shrink-0">
@@ -339,7 +319,7 @@ export default function App() {
           ) : (
             <>
               <span className="text-slate-600">
-                {conn === 'connecting' ? 'connecting…' : 'offline (sample feed)'}
+                {conn === 'connecting' ? 'connecting…' : 'offline'}
               </span>
               {conn === 'connecting' ? (
                 <Loader2 className="w-4 h-4 text-slate-500 animate-spin" strokeWidth={1.75} />
@@ -483,7 +463,14 @@ export default function App() {
 
         {/* Right inspector */}
         <div className="hidden lg:block lg:col-span-5 overflow-y-auto p-6 bg-black/15 select-text min-h-0">
-          {activeLead && <InspectorContent lead={activeLead} copyState={copyState[activeLead.id]} onCopy={copyPitch} />}
+          {activeLead && (
+            <InspectorContent
+              lead={activeLead}
+              filter={filter}
+              copyState={copyState[activeLead.id]}
+              onCopy={copyPitch}
+            />
+          )}
         </div>
       </main>
 
@@ -504,7 +491,12 @@ export default function App() {
                 <X className="w-4 h-4" strokeWidth={1.75} />
               </button>
             </div>
-            <InspectorContent lead={activeLead} copyState={copyState[activeLead.id]} onCopy={copyPitch} />
+            <InspectorContent
+              lead={activeLead}
+              filter={filter}
+              copyState={copyState[activeLead.id]}
+              onCopy={copyPitch}
+            />
           </div>
         </div>
       )}
@@ -514,10 +506,12 @@ export default function App() {
 
 function InspectorContent({
   lead,
+  filter,
   copyState,
   onCopy,
 }: {
   lead: QualifiedLead;
+  filter: 'contracts' | 'jobs';
   copyState?: 'copied' | 'error';
   onCopy: (id: string, text: string) => void;
 }) {
@@ -568,7 +562,7 @@ function InspectorContent({
       <section className="border-t border-white/[0.08] pt-5 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <span className="font-mono text-xs uppercase tracking-wider text-slate-500">
-            Draft Response Pitch
+            {filter === 'contracts' ? 'Draft Pitch' : 'Cover Letter'}
           </span>
           <button
             onClick={() => onCopy(lead.id, lead.draft_proposal)}

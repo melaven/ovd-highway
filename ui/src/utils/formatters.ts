@@ -25,8 +25,12 @@ export function getScoreTier(score: number): 'high' | 'medium' | 'low' {
   return 'low';
 }
 
-export function getSourceFromSignal(source: string): 'MTPROTO' | 'HABR' | 'WEB' {
+export type LeadSource = 'MTPROTO' | 'HABR' | 'WEB' | 'REDDIT' | 'HH';
+
+export function getSourceFromSignal(source: string): LeadSource {
   const sourceLower = source.toLowerCase();
+  if (sourceLower.includes('reddit')) return 'REDDIT';
+  if (sourceLower.includes('hh')) return 'HH';
   if (sourceLower.includes('telegram') || sourceLower.includes('mtproto')) return 'MTPROTO';
   if (sourceLower.includes('habr')) return 'HABR';
   return 'WEB';

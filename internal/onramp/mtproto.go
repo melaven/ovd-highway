@@ -56,6 +56,10 @@ func NewMTProtoSource(apiID int, apiHash, phone, sessionFile string, log *slog.L
 	}
 }
 
+func (m *MTProtoSource) Name() string {
+	return "telegram_mtproto"
+}
+
 func (m *MTProtoSource) Start(ctx context.Context, out chan<- domain.RawSignal) error {
 	dispatcher := tg.NewUpdateDispatcher()
 
