@@ -3,6 +3,7 @@ package onramp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -14,11 +15,12 @@ import (
 	"github.com/google/uuid"
 
 	"ovd/internal/domain"
+	"ovd/internal/pkg/breaker"
 )
 
 const (
 	hhVacanciesURL   = "https://api.hh.ru/vacancies?text=developer&per_page=10"
-	hhUserAgent      = "ovd-highway/1.0 (maxim.nesterov84@gmail.com)"
+	hhUserAgent      = "OVD-Highway/1.0 (work.melaven@gmail.com)"
 	hhPollPeriod     = 60 * time.Second
 	hhRequestTimeout = 20 * time.Second
 )
@@ -26,12 +28,19 @@ const (
 type HHConnector struct {
 	client   *http.Client
 	endpoint string
+	breaker  *breaker.Breaker
 }
 
 func NewHHConnector() *HHConnector {
 	return &HHConnector{
-		client:   &http.Client{Timeout: hhRequestTimeout},
+		client: &http.Client{
+			Timeout: hhRequestTimeout,
+			Transport: &http.Transport{
+				Proxy: nil,
+			},
+		},
 		endpoint: hhVacanciesURL,
+		breaker:  breaker.New(breaker.Options{}),
 	}
 }
 
@@ -44,8 +53,19 @@ func (h *HHConnector) Start(ctx context.Context, signals chan<- domain.RawSignal
 		if ctx.Err() != nil {
 			return nil
 		}
-		if err := h.poll(ctx, signals); err != nil && ctx.Err() == nil {
-			log.Printf("hh connector poll failed: %v", err)
+		pollErr := h.breaker.Execute(func() error {
+			err := h.poll(ctx, signals)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil
+			}
+			return err
+		})
+		if pollErr != nil && ctx.Err() == nil {
+			if errors.Is(pollErr, breaker.ErrOpen) {
+				log.Printf("hh connector circuit open, skipping poll")
+			} else {
+				log.Printf("hh connector poll failed: %v", pollErr)
+			}
 		}
 
 		timer := time.NewTimer(hhPollPeriod)
@@ -64,7 +84,9 @@ func (h *HHConnector) poll(ctx context.Context, signals chan<- domain.RawSignal)
 		return fmt.Errorf("create HH request: %w", err)
 	}
 	req = req.WithContext(ctx)
+	req.Header.Set("HH-User-Agent", hhUserAgent)
 	req.Header.Set("User-Agent", hhUserAgent)
+	req.Header.Set("Accept", "application/json")
 
 	resp, err := h.client.Do(req)
 	if err != nil {
@@ -72,8 +94,9 @@ func (h *HHConnector) poll(ctx context.Context, signals chan<- domain.RawSignal)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("HH returned HTTP status %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 500))
+		return fmt.Errorf("HH returned HTTP status %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
 	}
 
 	var vacancies hhVacanciesResponse

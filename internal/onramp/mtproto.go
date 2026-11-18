@@ -3,6 +3,7 @@ package onramp
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -20,6 +21,7 @@ import (
 	tg "github.com/gotd/td/tg"
 
 	"ovd/internal/domain"
+	"ovd/internal/pkg/breaker"
 )
 
 var (
@@ -43,6 +45,7 @@ type MTProtoSource struct {
 	allowedMu sync.RWMutex
 	allowed   map[int64]string // channelID -> username
 	tgAPI     atomic.Pointer[tg.Client]
+	breaker   *breaker.Breaker
 }
 
 func NewMTProtoSource(apiID int, apiHash, phone, sessionFile string, log *slog.Logger) *MTProtoSource {
@@ -53,6 +56,7 @@ func NewMTProtoSource(apiID int, apiHash, phone, sessionFile string, log *slog.L
 		sessionFile: sessionFile,
 		log:         log.With("component", "mtproto_onramp"),
 		allowed:     make(map[int64]string),
+		breaker:     breaker.New(breaker.Options{}),
 	}
 }
 
@@ -86,6 +90,50 @@ func (m *MTProtoSource) Start(ctx context.Context, out chan<- domain.RawSignal) 
 
 	m.log.Info("mtproto client starting", "session", m.sessionFile)
 
+	return m.runWithBreaker(ctx, client, out)
+}
+
+// mtprotoReconnectDelay is the pause between session attempts after a
+// failure or while the circuit breaker is open.
+const mtprotoReconnectDelay = 10 * time.Second
+
+// runWithBreaker keeps the MTProto session alive across transient
+// failures. Each client.Run attempt is wrapped in the circuit breaker:
+// repeated session failures open the circuit and reconnects are paused
+// until the cooldown probe succeeds.
+func (m *MTProtoSource) runWithBreaker(ctx context.Context, client *telegram.Client, out chan<- domain.RawSignal) error {
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		err := m.breaker.Execute(func() error {
+			runErr := m.runSession(ctx, client, out)
+			if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
+				return nil
+			}
+			return runErr
+		})
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err != nil {
+			if errors.Is(err, breaker.ErrOpen) {
+				m.log.Warn("mtproto circuit open, pausing reconnects")
+			} else {
+				m.log.Error("mtproto session terminated", "err", err)
+			}
+		}
+		// Always pace reconnect attempts: a fast nil return must not
+		// spin the loop, and the open-circuit pause doubles as backoff.
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(mtprotoReconnectDelay):
+		}
+	}
+}
+
+func (m *MTProtoSource) runSession(ctx context.Context, client *telegram.Client, out chan<- domain.RawSignal) error {
 	return client.Run(ctx, func(ctx context.Context) error {
 		status, err := client.Auth().Status(ctx)
 		if err != nil {
