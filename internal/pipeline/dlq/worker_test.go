@@ -10,13 +10,15 @@ import (
 )
 
 type fakeRetryStore struct {
-	due       []RetryRecord
-	fetchErr  error
-	resolved  []string
-	failed    []failCall
-	fetchNow  time.Time
+	due        []RetryRecord
+	fetchErr   error
+	resolved   []string
+	failed     []failCall
+	resolvedCh chan string
+	failedCh   chan failCall
+	fetchNow   time.Time
 	maxRetries int
-	limit     int
+	limit      int
 }
 
 type failCall struct {
@@ -38,11 +40,18 @@ func (f *fakeRetryStore) FetchDue(ctx context.Context, now time.Time, maxRetries
 
 func (f *fakeRetryStore) Resolve(ctx context.Context, id string) error {
 	f.resolved = append(f.resolved, id)
+	if f.resolvedCh != nil {
+		f.resolvedCh <- id
+	}
 	return nil
 }
 
 func (f *fakeRetryStore) Fail(ctx context.Context, id string, retryCount int, nextRetryAt time.Time, reason string) error {
-	f.failed = append(f.failed, failCall{id: id, retryCount: retryCount, next: nextRetryAt, reason: reason})
+	call := failCall{id: id, retryCount: retryCount, next: nextRetryAt, reason: reason}
+	f.failed = append(f.failed, call)
+	if f.failedCh != nil {
+		f.failedCh <- call
+	}
 	return nil
 }
 
@@ -51,10 +60,13 @@ func testLogger() *slog.Logger {
 }
 
 func TestWorkerResolvesSuccessfulRecord(t *testing.T) {
-	store := &fakeRetryStore{due: []RetryRecord{{ID: "r1", Source: "reddit", Payload: []byte(`{"id":"s1"}`), RetryCount: 1}}}
-	var processed []RetryRecord
+	store := &fakeRetryStore{
+		due:        []RetryRecord{{ID: "r1", Source: "reddit", Payload: []byte(`{"id":"s1"}`), RetryCount: 1}},
+		resolvedCh: make(chan string, 1),
+	}
+	processed := make(chan RetryRecord, 1)
 	w, err := NewWorker(store, func(ctx context.Context, rec RetryRecord) error {
-		processed = append(processed, rec)
+		processed <- rec
 		return nil
 	}, WorkerOptions{Interval: time.Hour, BatchSize: 5, MaxRetries: 3, BaseBackoff: time.Minute}, testLogger())
 	if err != nil {
@@ -64,17 +76,21 @@ func TestWorkerResolvesSuccessfulRecord(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { defer close(done); _ = w.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
 
-	// Wait for the immediate first batch.
-	deadline := time.Now().Add(2 * time.Second)
-	for len(processed) == 0 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
+	select {
+	case <-store.resolvedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not resolve the record")
 	}
 	cancel()
 	<-done
 
-	if len(processed) != 1 || processed[0].ID != "r1" {
-		t.Fatalf("processed = %+v", processed)
+	if got := <-processed; got.ID != "r1" {
+		t.Fatalf("processed = %+v", got)
 	}
 	if len(store.resolved) != 1 || store.resolved[0] != "r1" {
 		t.Fatalf("resolved = %v", store.resolved)
@@ -89,7 +105,10 @@ func TestWorkerResolvesSuccessfulRecord(t *testing.T) {
 
 func TestWorkerSchedulesRetryWithBackoff(t *testing.T) {
 	before := time.Now()
-	store := &fakeRetryStore{due: []RetryRecord{{ID: "r2", RetryCount: 2}}}
+	store := &fakeRetryStore{
+		due:      []RetryRecord{{ID: "r2", RetryCount: 2}},
+		failedCh: make(chan failCall, 1),
+	}
 	w, err := NewWorker(store, func(ctx context.Context, rec RetryRecord) error {
 		return errors.New("llm still 429")
 	}, WorkerOptions{Interval: time.Hour, BatchSize: 5, MaxRetries: 5, BaseBackoff: time.Minute, MaxBackoff: time.Hour}, testLogger())
@@ -100,9 +119,14 @@ func TestWorkerSchedulesRetryWithBackoff(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { defer close(done); _ = w.Run(ctx) }()
-	deadline := time.Now().Add(2 * time.Second)
-	for len(store.failed) == 0 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	select {
+	case <-store.failedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not schedule the retry")
 	}
 	cancel()
 	<-done
