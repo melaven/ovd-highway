@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 500" width="100%" height="100%">
+  <defs>
+    <style>
+      .bg { fill: #0d1117; }
+      .frame { fill: none; stroke: #21262d; stroke-width: 1.5; }
+      .title { fill: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 20px; font-weight: 700; letter-spacing: 0.06em; }
+      .subtitle { fill: #64748b; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; letter-spacing: 0.12em; }
+      .station-title { fill: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 600; }
+      .station-sub { fill: #94a3b8; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 10.5px; }
+      .legend-text { fill: #94a3b8; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; }
+      
+      .line-red { fill: none; stroke: #f43f5e; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
+      .line-amber { fill: none; stroke: #f59e0b; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
+      .line-emerald { fill: none; stroke: #10b981; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
+      .line-emerald-dash { fill: none; stroke: #10b981; stroke-width: 3; stroke-dasharray: 6 6; stroke-linecap: round; stroke-linejoin: round; opacity: 0.75; }
+      .line-blue { fill: none; stroke: #38bdf8; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
+      .line-purple { fill: none; stroke: #a855f7; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
+
+      .node-base { fill: #0d1117; stroke-width: 4.5; }
+      .node-red { stroke: #f43f5e; }
+      .node-amber { stroke: #f59e0b; }
+      .node-emerald { stroke: #10b981; }
+      .node-blue { stroke: #38bdf8; }
+      .node-purple { stroke: #a855f7; }
+      .interchange-outer { fill: #0d1117; stroke: #f8fafc; stroke-width: 3; }
+      .interchange-inner { fill: #f8fafc; }
+    </style>
+  </defs>
+
+  <!-- Canvas Background -->
+  <rect class="bg" width="1080" height="500" rx="12" />
+  <rect class="frame" x="1" y="1" width="1078" height="498" rx="12" />
+
+  <!-- Header -->
+  <text x="540" y="42" text-anchor="middle" class="title">OVD // HIGHWAY — SYSTEM ARCHITECTURE METRO MAP</text>
+  <text x="540" y="62" text-anchor="middle" class="subtitle">MULTI-PROTOCOL INGESTION · DETERMINISTIC TRIAGE · REAL-TIME TELEMETRY</text>
+
+  <!-- ==================== TRANSIT LINES ==================== -->
+  <!-- Line 1 (Red): Data Plane On-Ramps -->
+  <path class="line-red" d="M 110 130 L 660 130 L 660 220" />
+
+  <!-- Line 2 (Amber): Control Plane Loop -->
+  <path class="line-amber" d="M 110 220 L 340 220 L 340 130" />
+
+  <!-- Line 3 (Emerald): Express Triage Pipeline -->
+  <path class="line-emerald" d="M 660 220 L 960 220 L 960 315 L 760 315" />
+  <!-- Retry & Rollback Loop -->
+  <path class="line-emerald-dash" d="M 960 220 L 1015 220 L 1015 275 L 960 275" />
+
+  <!-- Line 4 (Blue): Persistence & Streaming -->
+  <path class="line-blue" d="M 760 315 L 220 315 L 220 405 L 430 405" />
+
+  <!-- Line 5 (Purple): Exit & Operator Workbench -->
+  <path class="line-purple" d="M 430 405 L 930 405" />
+
+  <!-- ==================== STATIONS & LABELS ==================== -->
+
+  <!-- ROW 1: y = 130 (Red Line) -->
+  <!-- Station 1.1: Telegram MTProto -->
+  <circle cx="110" cy="130" r="8" class="node-base node-red" />
+  <text x="110" y="102" text-anchor="middle" class="station-title">Telegram MTProto</text>
+  <text x="110" y="116" text-anchor="middle" class="station-sub">gotd/td Socket</text>
+
+  <!-- Station 1.2: Dynamic Whitelist (Interchange Red + Amber) -->
+  <circle cx="340" cy="130" r="11" class="interchange-outer" />
+  <circle cx="340" cy="130" r="4.5" class="interchange-inner" />
+  <text x="340" y="102" text-anchor="middle" class="station-title">Dynamic Whitelist</text>
+  <text x="340" y="116" text-anchor="middle" class="station-sub">Hot-Reload Channels</text>
+
+  <!-- Station 1.3: Reddit OAuth2 -->
+  <circle cx="505" cy="130" r="8" class="node-base node-red" />
+  <text x="505" y="102" text-anchor="middle" class="station-title">Reddit OAuth2</text>
+  <text x="505" y="116" text-anchor="middle" class="station-sub">r/forhire [Hiring]</text>
+
+  <!-- Station 1.4: HeadHunter API -->
+  <circle cx="660" cy="130" r="8" class="node-base node-red" />
+  <text x="660" y="102" text-anchor="middle" class="station-title">HeadHunter API</text>
+  <text x="660" y="116" text-anchor="middle" class="station-sub">Direct ISP Route</text>
+
+  <!-- ROW 2: y = 220 (Amber & Emerald) -->
+  <!-- Station 2.1: Admin Control Bot -->
+  <circle cx="110" cy="220" r="8" class="node-base node-amber" />
+  <text x="110" y="246" text-anchor="middle" class="station-title">Admin Control Bot</text>
+  <text x="110" y="260" text-anchor="middle" class="station-sub">ADMIN_TG_ID Guard</text>
+
+  <!-- Station 2.2: Split-Proxy Router -->
+  <circle cx="240" cy="220" r="8" class="node-base node-amber" />
+  <text x="240" y="246" text-anchor="middle" class="station-title">Track Classifier</text>
+  <text x="240" y="260" text-anchor="middle" class="station-sub">Contracts vs Jobs</text>
+
+  <!-- Station 2.3: Buffered Channel (Interchange Red + Emerald) -->
+  <circle cx="660" cy="220" r="11" class="interchange-outer" />
+  <circle cx="660" cy="220" r="4.5" class="interchange-inner" />
+  <text x="644" y="246" text-anchor="end" class="station-title">Buffered Go Channel</text>
+  <text x="644" y="260" text-anchor="end" class="station-sub">Zero-Blocking Backpressure</text>
+
+  <!-- Station 2.4: Deterministic Pre-Filter -->
+  <circle cx="810" cy="220" r="8" class="node-base node-emerald" />
+  <text x="810" y="192" text-anchor="middle" class="station-title">Pre-Filter Gate</text>
+  <text x="810" y="206" text-anchor="middle" class="station-sub">Budget &amp; Noise Drop</text>
+
+  <!-- Station 2.5: Redis Deduplicator -->
+  <circle cx="960" cy="220" r="8" class="node-base node-emerald" />
+  <text x="960" y="192" text-anchor="middle" class="station-title">Redis Dedup</text>
+  <text x="960" y="206" text-anchor="middle" class="station-sub">SHA-256 SETNX</text>
+
+  <!-- ROW 3: y = 315 (Emerald & Blue) -->
+  <!-- Station 3.1: LLM Triage Pool -->
+  <circle cx="960" cy="315" r="8" class="node-base node-emerald" />
+  <text x="960" y="341" text-anchor="middle" class="station-title">LLM Triage Pool</text>
+  <text x="960" y="355" text-anchor="middle" class="station-sub">Retry + Cache Rollback</text>
+
+  <!-- Station 3.2: Qualified Lead (Interchange Emerald + Blue) -->
+  <circle cx="760" cy="315" r="11" class="interchange-outer" />
+  <circle cx="760" cy="315" r="4.5" class="interchange-inner" />
+  <text x="760" y="287" text-anchor="middle" class="station-title">Qualified Lead</text>
+  <text x="760" y="301" text-anchor="middle" class="station-sub">Score + Tech Stack</text>
+
+  <!-- Station 3.3: PostgreSQL Store -->
+  <circle cx="490" cy="315" r="8" class="node-base node-blue" />
+  <text x="490" y="287" text-anchor="middle" class="station-title">PostgreSQL 16</text>
+  <text x="490" y="301" text-anchor="middle" class="station-sub">Persistent State &amp; JSONB</text>
+
+  <!-- Station 3.4: Hydration Snapshot -->
+  <circle cx="220" cy="315" r="8" class="node-base node-blue" />
+  <text x="220" y="287" text-anchor="middle" class="station-title">State Hydrator</text>
+  <text x="220" y="301" text-anchor="middle" class="station-sub">Init Snapshot on Connect</text>
+
+  <!-- ROW 4: y = 405 (Blue & Purple) -->
+  <!-- Station 4.1: WebSocket Hub (Interchange Blue + Purple) -->
+  <circle cx="430" cy="405" r="11" class="interchange-outer" />
+  <circle cx="430" cy="405" r="4.5" class="interchange-inner" />
+  <text x="430" y="377" text-anchor="middle" class="station-title">WebSocket Hub</text>
+  <text x="430" y="391" text-anchor="middle" class="station-sub">:8080 Live Broadcast</text>
+
+  <!-- Station 4.2: React Telemetry Shell -->
+  <circle cx="690" cy="405" r="8" class="node-base node-purple" />
+  <text x="690" y="377" text-anchor="middle" class="station-title">100vh Telemetry UI</text>
+  <text x="690" y="391" text-anchor="middle" class="station-sub">React 19 + TypeScript</text>
+
+  <!-- Station 4.3: Pitch & Alert Exit -->
+  <circle cx="930" cy="405" r="8" class="node-base node-purple" />
+  <text x="930" y="377" text-anchor="middle" class="station-title">Operator Action</text>
+  <text x="930" y="391" text-anchor="middle" class="station-sub">TG Alerts &amp; 1-Click Pitch</text>
+
+  <!-- ==================== LEGEND BAR ==================== -->
+  <line x1="40" y1="452" x2="1040" y2="452" stroke="#21262d" stroke-width="1" />
+
+  <circle cx="80" cy="475" r="5" fill="#f43f5e" />
+  <text x="94" y="479" class="legend-text">On-Ramp Line</text>
+
+  <circle cx="240" cy="475" r="5" fill="#f59e0b" />
+  <text x="254" y="479" class="legend-text">Control Plane</text>
+
+  <circle cx="400" cy="475" r="5" fill="#10b981" />
+  <text x="414" y="479" class="legend-text">Triage Express</text>
+
+  <circle cx="565" cy="475" r="5" fill="#38bdf8" />
+  <text x="579" y="479" class="legend-text">Persistence Line</text>
+
+  <circle cx="745" cy="475" r="5" fill="#a855f7" />
+  <text x="759" y="479" class="legend-text">Exit &amp; UI Line</text>
+
+  <circle cx="910" cy="475" r="6" class="interchange-outer" />
+  <circle cx="910" cy="475" r="2.5" class="interchange-inner" />
+  <text x="925" y="479" class="legend-text">Interchange</text>
+</svg>
