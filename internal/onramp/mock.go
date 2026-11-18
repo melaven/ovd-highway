@@ -24,6 +24,10 @@ func NewMockSource(log *slog.Logger) *MockSource {
 	}
 }
 
+func (m *MockSource) Name() string {
+	return "mock"
+}
+
 func (m *MockSource) Start(ctx context.Context, out chan<- domain.RawSignal) error {
 	m.log.Info("mock onramp started")
 
