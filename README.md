@@ -15,7 +15,7 @@
   <a href="./docs/README.zh-CN.md">简体中文</a>
 </p>
 
-## 📌 Overview
+## Overview
 
 OVD HIGHWAY is a multi-protocol system for collecting and AI-qualifying leads from multiple sources — **Telegram (MTProto)**, **Reddit (OAuth2)**, and **HeadHunter API** — paired with a real-time glassmorphism dashboard.
 
@@ -23,7 +23,7 @@ It is designed around a **zero-blocking pipeline**: ingestion connectors never s
 
 ![OVD Highway Preview](./docs/preview.png)
 
-## 🏗️ System Architecture
+## System Architecture
 
 ![OVD Highway Architecture](./docs/architecture.svg)
 
@@ -33,7 +33,7 @@ It is designed around a **zero-blocking pipeline**: ingestion connectors never s
 
 See the full diagram in [`docs/architecture.svg`](./docs/architecture.svg).
 
-## ✨ Core Engineering Highlights
+## Core Engineering Highlights
 
 - **Zero-Blocking Backpressure** — buffered Go channels decouple connectors from the LLM lane; slow consumers never block ingestion.
 - **Official API Protocols** — clean `net/http` clients only: Reddit `client_credentials` OAuth2 with cached token refresh, HeadHunter direct-ISP routing (`Proxy: nil`) with official `HH-User-Agent` headers. No browser spoofing.
@@ -42,7 +42,7 @@ See the full diagram in [`docs/architecture.svg`](./docs/architecture.svg).
 - **Dead Letter Queue** (`internal/pipeline/dlq` + `migrations/`) — PostgreSQL-backed archive for LLM failures (429/5xx) with `dedupe_key` idempotency and Redis rollback so signals are re-ingested, never silently lost.
 - **Real-time Telemetry** — WebSocket hub broadcasting leads to a React 19 + TypeScript glassmorphism UI.
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```
 ovd-highway/
@@ -62,7 +62,7 @@ ovd-highway/
 └── .github/workflows/   # CI: race-detector tests, linux build, ui build
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Backend
 
@@ -92,16 +92,16 @@ go test -race ./...
 
 GitHub Actions runs backend tests with the race detector, cross-compiles the Linux binary, and builds the UI on every push/PR to `main` — see [`.github/workflows/ci.yml`](./.github/workflows/ci.yml).
 
-## 📜 License
+## License
 
 This project is licensed under the [MIT License](./LICENSE) — © 2026 Maxim Kadochnikov.
 
-## 👤 Author
+## Author
 
 **Maxim Kadochnikov (Melaven)** — Full-Stack & Infrastructure Engineer
 
-- 🌐 Website: https://vercel.app
-- 🐙 GitHub: https://github.com
-- 𝕏 X: https://x.com
-- 💬 Discord: `@melaven`
-- ✉️ Email: work.melaven@gmail.com
+-  Website: https://vercel.app
+-  GitHub: https://github.com
+- 𝕏: https://x.com
+-  Discord: `@melaven`
+-  Email: work.melaven@gmail.com
