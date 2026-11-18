@@ -15,6 +15,12 @@ type DeadLetterEntry struct {
 	ErrorReason string
 	RetryCount  int
 	NextRetryAt time.Time
+	// DedupeKey is the caller-supplied deduplication key for this
+	// signal. Archive implementations should store it in the
+	// dedupe_key column, which has a UNIQUE index, so retried
+	// HandleLLMFailure calls archive at most one row per key.
+	// Empty means "no dedupe" and is stored as NULL.
+	DedupeKey string
 }
 
 // ArchiveStore persists a dead-letter entry. Implementations must be
@@ -76,9 +82,11 @@ func NewManager(archive ArchiveStore, dedup DedupStore, opts Options) (*Manager,
 // lost silently.
 //
 // If the archive succeeds but the dedupe delete fails, an error is
-// still returned; the entry is safely stored and a retry of this call
-// will archive a duplicate row (callers should treat this as
-// at-least-once delivery).
+// still returned; the entry is safely stored. A retried call hits the
+// dedupe_key UNIQUE index: with a conforming ArchiveStore
+// (ON CONFLICT DO NOTHING) no duplicate row is written and the
+// dedupe release is retried. Without a dedupeKey, delivery is
+// at-least-once and duplicates are possible.
 func (m *Manager) HandleLLMFailure(ctx context.Context, source string, payload []byte, dedupeKey string, errReason string) error {
 	if ctx == nil {
 		return errors.New("dlq: context is required")
@@ -99,6 +107,7 @@ func (m *Manager) HandleLLMFailure(ctx context.Context, source string, payload [
 		ErrorReason: errReason,
 		RetryCount:  0,
 		NextRetryAt: m.now().Add(m.retryDelay),
+		DedupeKey:   dedupeKey,
 	}
 
 	if err := m.archive.Archive(ctx, entry); err != nil {

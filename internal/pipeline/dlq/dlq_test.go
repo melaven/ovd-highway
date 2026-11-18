@@ -73,6 +73,9 @@ func TestHandleLLMFailureSuccess(t *testing.T) {
 	if entry.RetryCount != 0 {
 		t.Errorf("entry.RetryCount = %d, want 0", entry.RetryCount)
 	}
+	if entry.DedupeKey != "dedup:reddit:sig-1" {
+		t.Errorf("entry.DedupeKey = %q, want dedup:reddit:sig-1", entry.DedupeKey)
+	}
 	if entry.NextRetryAt.IsZero() {
 		t.Error("entry.NextRetryAt is zero, want set")
 	}
