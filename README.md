@@ -101,8 +101,8 @@ This project is licensed under the [MIT License](./LICENSE) — © 2026 Maxim Ka
 
 **Maxim Kadochnikov (Melaven)** — Full-Stack & Infrastructure Engineer
 
-- 🌐 Website: https://melaven-dev.vercel.app/
-- 🐙 GitHub: https://github.com/melaven
-- 𝕏 X: https://x.com
-- 💬 Discord: `@melaven`
-- ✉️ Email: work.melaven@gmail.com
+-  Website: https://melaven-dev.vercel.app/
+- GitHub: https://github.com/melaven
+- 𝕏: https://x.com
+-  Discord: `@melaven`
+-  Email: work.melaven@gmail.com
