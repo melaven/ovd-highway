@@ -1,25 +1,37 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FileText, Loader2, RotateCcw, Save, SlidersHorizontal } from 'lucide-react';
+import { FileText, KeyRound, Loader2, RotateCcw, Save, SlidersHorizontal } from 'lucide-react';
 import { putSettings, type ApiResult } from '../lib/api';
 import type { EngineSettings } from '../types/controlPlane';
 
 interface RulesViewProps {
   settings: EngineSettings | null;
   offline: boolean;
+  authRequired: boolean;
   loading: boolean;
+  onOpenTokenLock: () => void;
   onSaved: (settings: EngineSettings) => void;
 }
 
-export default function RulesView({ settings, offline, loading, onSaved }: RulesViewProps) {
+export default function RulesView({
+  settings,
+  offline,
+  authRequired,
+  loading,
+  onOpenTokenLock,
+  onSaved,
+}: RulesViewProps) {
   const [prompt, setPrompt] = useState('');
   const [minScore, setMinScore] = useState(0);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
+  const clampScore = (val: number) =>
+    Number.isFinite(val) ? Math.max(0, Math.min(100, Math.round(val))) : 0;
+
   useEffect(() => {
     if (settings) {
       setPrompt(settings.system_prompt ?? '');
-      setMinScore(Number(settings.min_score ?? 0));
+      setMinScore(clampScore(Number(settings.min_score ?? 0)));
     }
   }, [settings]);
 
@@ -36,11 +48,15 @@ export default function RulesView({ settings, offline, loading, onSaved }: Rules
 
   const handleSave = async () => {
     if (saving) return;
+    if (!prompt.trim()) {
+      flash('err', 'System prompt cannot be empty');
+      return;
+    }
     setSaving(true);
     setStatus(null);
     const payload: EngineSettings = {
       system_prompt: prompt,
-      min_score: Math.max(0, Math.min(100, Math.round(minScore))),
+      min_score: clampScore(minScore),
     };
     const r: ApiResult<EngineSettings> = await putSettings(payload);
     setSaving(false);
@@ -62,7 +78,7 @@ export default function RulesView({ settings, offline, loading, onSaved }: Rules
     }
   };
 
-  const disabled = saving || offline || !settings;
+  const disabled = saving || offline || authRequired || !settings || !prompt.trim();
 
   return (
     <div className="h-full flex flex-col min-h-0 p-4 gap-4 overflow-y-auto">
@@ -73,6 +89,20 @@ export default function RulesView({ settings, offline, loading, onSaved }: Rules
         </span>
       </div>
 
+      {authRequired && (
+        <div className="shrink-0 glass-panel rounded-lg px-3 py-2.5 flex items-center justify-between gap-3">
+          <span className="font-sans text-[11px] text-amber-200/90">
+            Authentication required — unlock to view and edit engine settings
+          </span>
+          <button
+            onClick={onOpenTokenLock}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[rgba(141,153,174,0.18)] hover:bg-[rgba(141,153,174,0.26)] border border-[var(--glass-border-hover)] font-sans text-[11px] font-medium text-[var(--text-primary)] transition-colors duration-[120ms] ease-out"
+          >
+            <KeyRound className="w-3 h-3" strokeWidth={1.75} />
+            Unlock
+          </button>
+        </div>
+      )}
       {offline && (
         <p className="shrink-0 font-sans text-[11px] text-[var(--text-muted)]">
           Control Plane API endpoint offline / awaiting backend — showing cached/empty state
@@ -130,8 +160,11 @@ export default function RulesView({ settings, offline, loading, onSaved }: Rules
             type="number"
             min={0}
             max={100}
-            value={minScore}
-            onChange={(e) => setMinScore(Number(e.target.value))}
+            value={clampScore(minScore)}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setMinScore(raw === '' ? 0 : clampScore(Number(raw)));
+            }}
             className="glass-input w-20 rounded-md px-2 py-1 font-mono text-xs tabular-nums"
           />
           <span className="font-sans text-[10px] text-[var(--text-muted)]">
