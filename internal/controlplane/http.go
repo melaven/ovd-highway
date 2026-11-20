@@ -12,17 +12,19 @@ import (
 // It is intended to be mounted behind api.BearerAuth and api.CORS.
 type Handler struct {
 	repo     SourceRepo
+	leads    LeadRepo
 	settings *SettingsStore
 	manager  *SourceManager
 	log      *slog.Logger
 }
 
-func NewHandler(repo SourceRepo, settings *SettingsStore, manager *SourceManager, log *slog.Logger) *Handler {
+func NewHandler(repo SourceRepo, leads LeadRepo, settings *SettingsStore, manager *SourceManager, log *slog.Logger) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Handler{
 		repo:     repo,
+		leads:    leads,
 		settings: settings,
 		manager:  manager,
 		log:      log.With("component", "controlplane_api"),
@@ -38,6 +40,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/sources/{id}", h.deleteSource)
 	mux.HandleFunc("GET /api/v1/settings", h.getSettings)
 	mux.HandleFunc("PUT /api/v1/settings", h.putSettings)
+	mux.HandleFunc("PATCH /api/v1/leads/{id}", h.patchLead)
 	return mux
 }
 
@@ -107,6 +110,33 @@ func (h *Handler) deleteSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) patchLead(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var p UpdateLeadPayload
+	if err := api.DecodeJSON(w, r, &p); err != nil {
+		return
+	}
+	if err := p.Validate(); err != nil {
+		api.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	res, err := h.leads.UpdateLead(r.Context(), id, p)
+	if errors.Is(err, ErrInvalidLeadID) {
+		api.WriteError(w, http.StatusBadRequest, "invalid lead id")
+		return
+	}
+	if errors.Is(err, ErrLeadNotFound) {
+		api.WriteError(w, http.StatusNotFound, "lead not found")
+		return
+	}
+	if err != nil {
+		h.log.Error("update lead failed", "id", id, "err", err)
+		api.WriteError(w, http.StatusInternalServerError, "failed to update lead")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, res)
 }
 
 func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {

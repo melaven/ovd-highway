@@ -30,7 +30,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		SystemPrompt: "default prompt",
 		MinScore:     70,
 	}, discardLog())
-	h := NewHandler(repo, settings, mgr, discardLog())
+	h := NewHandler(repo, repo, settings, mgr, discardLog())
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		cancel()
@@ -198,5 +198,73 @@ func TestUnknownRoute404(t *testing.T) {
 	rec := do(t, env, http.MethodGet, "/api/v1/nope", "")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestPatchLeadStatus(t *testing.T) {
+	env := newTestEnv(t)
+	id := "11111111-1111-1111-1111-111111111111"
+	env.repo.seedLead(id, "new", "old pitch")
+
+	rec := do(t, env, http.MethodPatch, "/api/v1/leads/"+id, `{"status":"contacted"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var res LeadPatchResult
+	decodeJSON(t, rec, &res)
+	if res.ID != id || res.Status != "contacted" || res.DraftProposal != "old pitch" {
+		t.Fatalf("unexpected patch result: %+v", res)
+	}
+}
+
+func TestPatchLeadStatusAndDraft(t *testing.T) {
+	env := newTestEnv(t)
+	id := "22222222-2222-2222-2222-222222222222"
+	env.repo.seedLead(id, "new", "old pitch")
+
+	rec := do(t, env, http.MethodPatch, "/api/v1/leads/"+id,
+		`{"status":"archived","draft_proposal":"revised pitch"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var res LeadPatchResult
+	decodeJSON(t, rec, &res)
+	if res.Status != "archived" || res.DraftProposal != "revised pitch" {
+		t.Fatalf("unexpected patch result: %+v", res)
+	}
+}
+
+func TestPatchLeadValidation(t *testing.T) {
+	env := newTestEnv(t)
+	id := "33333333-3333-3333-3333-333333333333"
+	env.repo.seedLead(id, "new", "pitch")
+
+	for _, body := range []string{
+		`{"status":"bogus"}`,
+		`{}`,
+		`{"draft_proposal":"   "}`,
+		`{"status":null,"draft_proposal":null}`,
+	} {
+		rec := do(t, env, http.MethodPatch, "/api/v1/leads/"+id, body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("body %s: status = %d, want 400", body, rec.Code)
+		}
+	}
+}
+
+func TestPatchLeadInvalidUUID(t *testing.T) {
+	env := newTestEnv(t)
+	rec := do(t, env, http.MethodPatch, "/api/v1/leads/not-a-uuid", `{"status":"contacted"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPatchLeadNotFound(t *testing.T) {
+	env := newTestEnv(t)
+	rec := do(t, env, http.MethodPatch,
+		"/api/v1/leads/44444444-4444-4444-4444-444444444444", `{"status":"contacted"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
 	}
 }
