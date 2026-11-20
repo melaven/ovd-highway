@@ -11,6 +11,7 @@ import type {
   Source,
   UpdateSourcePayload,
 } from '../types/controlPlane';
+import type { LeadStatus } from './leads';
 
 const env = (import.meta as { env?: Record<string, string | undefined> }).env;
 
@@ -158,6 +159,29 @@ export function updateSource(
 export function deleteSource(id: string): Promise<ApiResult<void>> {
   return apiFetch<void>(`/sources/${encodeURIComponent(id)}`, {
     method: 'DELETE',
+  });
+}
+
+// ---- Leads ----
+
+export interface PatchLeadPayload {
+  status?: LeadStatus;
+  draft_proposal?: string;
+}
+
+export interface LeadPatchResult {
+  id: string;
+  status: LeadStatus;
+  draft_proposal: string;
+}
+
+export function patchLead(
+  id: string,
+  payload: PatchLeadPayload,
+): Promise<ApiResult<LeadPatchResult>> {
+  return apiFetch<LeadPatchResult>(`/leads/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
   });
 }
 

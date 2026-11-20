@@ -38,6 +38,9 @@ func Init(ctx context.Context, databaseURL string) (*sql.DB, error) {
 			initErr = fmt.Errorf("open PostgreSQL connection: %w", initErr)
 			return
 		}
+		db.SetMaxOpenConns(25)
+		db.SetMaxIdleConns(10)
+		db.SetConnMaxLifetime(5 * time.Minute)
 
 		pingCtx, cancel := context.WithTimeout(ctx, pingTimeout)
 		defer cancel()
@@ -77,6 +80,17 @@ func Init(ctx context.Context, databaseURL string) (*sql.DB, error) {
 			closeErr := db.Close()
 			db = nil
 			initErr = fmt.Errorf("create highway_leads created_at index: %w", err)
+			if closeErr != nil {
+				initErr = errors.Join(initErr, fmt.Errorf("close failed connection: %w", closeErr))
+			}
+			return
+		}
+
+		alterStatusQuery := `ALTER TABLE highway_leads ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'new'`
+		if _, err := db.ExecContext(ctx, alterStatusQuery); err != nil {
+			closeErr := db.Close()
+			db = nil
+			initErr = fmt.Errorf("add highway_leads status column: %w", err)
 			if closeErr != nil {
 				initErr = errors.Join(initErr, fmt.Errorf("close failed connection: %w", closeErr))
 			}
@@ -171,6 +185,12 @@ func SaveLead(ctx context.Context, db *sql.DB, lead domain.QualifiedLead) error 
 		return errors.New("database connection is required")
 	}
 
+	status := lead.Status
+	if !domain.ValidLeadStatus(status) {
+		status = domain.LeadStatusNew
+	}
+	lead.Status = status
+
 	techStack, err := json.Marshal(lead.Qualification.TechStack)
 	if err != nil {
 		return fmt.Errorf("marshal lead tech stack: %w", err)
@@ -181,8 +201,8 @@ func SaveLead(ctx context.Context, db *sql.DB, lead domain.QualifiedLead) error 
 	}
 
 	const query = `
-		INSERT INTO highway_leads (id, track, source, score, tech_stack, payload)
-		VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6::jsonb)
+		INSERT INTO highway_leads (id, track, source, score, tech_stack, payload, status)
+		VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
 		ON CONFLICT (id) DO NOTHING
 	`
 	if _, err := db.ExecContext(ctx, query,
@@ -192,6 +212,7 @@ func SaveLead(ctx context.Context, db *sql.DB, lead domain.QualifiedLead) error 
 		lead.Qualification.Score,
 		string(techStack),
 		string(payload),
+		status,
 	); err != nil {
 		return fmt.Errorf("insert qualified lead %q: %w", lead.Signal.ID, err)
 	}
@@ -211,7 +232,8 @@ func GetRecentLeads(ctx context.Context, limit int) ([]domain.QualifiedLead, err
 	}
 
 	rows, err := db.QueryContext(ctx,
-		`SELECT * FROM highway_leads ORDER BY created_at DESC LIMIT $1`,
+		`SELECT id, track, source, score, tech_stack, payload, created_at, status
+		 FROM highway_leads ORDER BY created_at DESC LIMIT $1`,
 		limit,
 	)
 	if err != nil {
@@ -225,11 +247,12 @@ func GetRecentLeads(ctx context.Context, limit int) ([]domain.QualifiedLead, err
 		var score int
 		var techStackJSON, payloadJSON []byte
 		var createdAt sql.NullTime
-		if err := rows.Scan(&id, &track, &source, &score, &techStackJSON, &payloadJSON, &createdAt); err != nil {
+		var status string
+		if err := rows.Scan(&id, &track, &source, &score, &techStackJSON, &payloadJSON, &createdAt, &status); err != nil {
 			return nil, fmt.Errorf("scan recent lead: %w", err)
 		}
 
-		lead, err := decodeRecentLead(id, track, source, score, techStackJSON, payloadJSON, createdAt)
+		lead, err := decodeRecentLead(id, track, source, score, techStackJSON, payloadJSON, createdAt, status)
 		if err != nil {
 			return nil, err
 		}
@@ -246,6 +269,7 @@ func decodeRecentLead(
 	score int,
 	techStackJSON, payloadJSON []byte,
 	createdAt sql.NullTime,
+	status string,
 ) (domain.QualifiedLead, error) {
 	var lead domain.QualifiedLead
 	if err := json.Unmarshal(payloadJSON, &lead); err != nil {
@@ -264,6 +288,10 @@ func decodeRecentLead(
 	lead.JobType = track
 	lead.Qualification.Score = score
 	lead.Qualification.TechStack = techStack
+	lead.Status = status
+	if !domain.ValidLeadStatus(lead.Status) {
+		lead.Status = domain.LeadStatusNew
+	}
 	if lead.QualifiedAt.IsZero() && createdAt.Valid {
 		lead.QualifiedAt = createdAt.Time
 	}

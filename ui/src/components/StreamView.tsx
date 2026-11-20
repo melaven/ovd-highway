@@ -1,12 +1,16 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Check, Copy, ExternalLink, Loader2, RotateCcw, Search, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Copy, ExternalLink, Loader2, RotateCcw, Search, Send, X } from 'lucide-react';
+import { patchLead, type PatchLeadPayload } from '../lib/api';
 import {
   SCORE_FILTERS,
   SOURCE_FILTERS,
+  STATUS_FILTERS,
   TRACK_TABS,
   scoreTextClass,
+  type LeadStatus,
   type QualifiedLead,
+  type StatusFilter,
   type TrackFilter,
 } from '../lib/leads';
 import type { ConnState } from '../App';
@@ -17,22 +21,24 @@ const INSPECTOR_MOTION = { duration: 0.13, ease: 'easeOut' as const };
 interface StreamViewProps {
   leads: QualifiedLead[];
   conn: ConnState;
+  onLeadUpdated: (id: string, patch: PatchLeadPayload) => void;
 }
 
-export default function StreamView({ leads, conn }: StreamViewProps) {
+export default function StreamView({ leads, conn, onLeadUpdated }: StreamViewProps) {
   const [selectedId, setSelectedId] = useState<string>('');
   const [minScore, setMinScore] = useState<number>(0);
   const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [filter, setFilter] = useState<TrackFilter>('contracts');
   const [query, setQuery] = useState<string>('');
-  const [copyState, setCopyState] = useState<Record<string, 'copied' | 'error'>>({});
   const [mobileSheet, setMobileSheet] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const filtered = useMemo(() => {
-    const expectedSource = filter === 'contracts' ? 'reddit' : 'hh';
     return leads.filter((item) => {
-      if (item.source !== expectedSource) return false;
+      const isJob = item.source === 'hh' || item.job_type === 'vacancy';
+      if (filter === 'jobs' ? !isJob : isJob) return false;
+      if (statusFilter !== 'all' && item.status !== statusFilter) return false;
       if (item.score < minScore) return false;
       if (sourceFilter !== 'all' && item.source !== sourceFilter) return false;
       if (query.trim()) {
@@ -42,7 +48,7 @@ export default function StreamView({ leads, conn }: StreamViewProps) {
       }
       return true;
     });
-  }, [leads, minScore, sourceFilter, query, filter]);
+  }, [leads, minScore, sourceFilter, statusFilter, query, filter]);
 
   const activeLead = useMemo(
     () => filtered.find((l) => l.id === selectedId) || filtered[0] || null,
@@ -52,24 +58,9 @@ export default function StreamView({ leads, conn }: StreamViewProps) {
   const resetFilters = () => {
     setMinScore(0);
     setSourceFilter('all');
+    setStatusFilter('all');
     setQuery('');
     setFilter('contracts');
-  };
-
-  const copyPitch = (id: string, text: string) => {
-    navigator.clipboard.writeText(text).then(
-      () => {
-        setCopyState((s) => ({ ...s, [id]: 'copied' }));
-        setTimeout(() => {
-          setCopyState((s) => {
-            const next = { ...s };
-            delete next[id];
-            return next;
-          });
-        }, 1600);
-      },
-      () => setCopyState((s) => ({ ...s, [id]: 'error' })),
-    );
   };
 
   const emptyMessage =
@@ -160,6 +151,20 @@ export default function StreamView({ leads, conn }: StreamViewProps) {
               {opt.label}
             </button>
           ))}
+          <span className="h-3.5 w-px bg-[var(--glass-border)] mx-1.5" />
+          {STATUS_FILTERS.map((opt) => (
+            <button
+              key={opt.label}
+              onClick={() => setStatusFilter(opt.val)}
+              className={`h-7 px-2 flex items-center border-b-2 transition-colors duration-[120ms] ease-out ${
+                statusFilter === opt.val
+                  ? 'border-duskmist text-[var(--text-primary)]'
+                  : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -199,6 +204,8 @@ export default function StreamView({ leads, conn }: StreamViewProps) {
                     if (window.innerWidth < 1024) setMobileSheet(true);
                   }}
                   className={`px-4 py-3 cursor-pointer transition-colors duration-[120ms] ease-out ${
+                    item.status === 'archived' ? 'opacity-55 ' : ''
+                  }${
                     isSelected
                       ? 'bg-[rgba(141,153,174,0.09)] shadow-[inset_2px_0_0_0_#8D99AE]'
                       : 'hover:bg-[rgba(141,153,174,0.05)]'
@@ -227,6 +234,16 @@ export default function StreamView({ leads, conn }: StreamViewProps) {
                         }`}
                       >
                         {item.job_type === 'vacancy' ? 'vac' : 'frl'}
+                      </span>
+                    )}
+                    {item.status === 'contacted' && (
+                      <span className="shrink-0 px-1.5 py-0.5 rounded-full border border-emerald-400/30 bg-emerald-400/10 font-sans text-[10px] font-medium uppercase tracking-wide text-emerald-300">
+                        contacted
+                      </span>
+                    )}
+                    {item.status === 'archived' && (
+                      <span className="shrink-0 px-1.5 py-0.5 rounded-full border border-[var(--glass-border)] bg-[rgba(141,153,174,0.06)] font-sans text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                        archived
                       </span>
                     )}
                     <span className="font-mono text-[11px] text-[var(--text-muted)] truncate">
@@ -263,8 +280,7 @@ export default function StreamView({ leads, conn }: StreamViewProps) {
               <InspectorContent
                 lead={activeLead}
                 filter={filter}
-                copyState={copyState[activeLead.id]}
-                onCopy={copyPitch}
+                onLeadUpdated={onLeadUpdated}
               />
             </motion.div>
           ) : (
@@ -301,8 +317,7 @@ export default function StreamView({ leads, conn }: StreamViewProps) {
               <InspectorContent
                 lead={activeLead}
                 filter={filter}
-                copyState={copyState[activeLead.id]}
-                onCopy={copyPitch}
+                onLeadUpdated={onLeadUpdated}
               />
             </motion.div>
           </div>
@@ -312,17 +327,106 @@ export default function StreamView({ leads, conn }: StreamViewProps) {
   );
 }
 
+function StatusBadge({ status }: { status: LeadStatus }) {
+  const styles: Record<LeadStatus, string> = {
+    new: 'border-[var(--glass-border)] bg-[rgba(141,153,174,0.06)] text-[var(--text-muted)]',
+    contacted: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
+    archived: 'border-[var(--glass-border)] bg-[rgba(141,153,174,0.04)] text-[var(--text-muted)] line-through',
+  };
+  return (
+    <span
+      className={`shrink-0 px-1.5 py-0.5 rounded-full border font-sans text-[10px] font-medium uppercase tracking-wide ${styles[status]}`}
+    >
+      {status}
+    </span>
+  );
+}
+
 function InspectorContent({
   lead,
   filter,
-  copyState,
-  onCopy,
+  onLeadUpdated,
 }: {
   lead: QualifiedLead;
   filter: TrackFilter;
-  copyState?: 'copied' | 'error';
-  onCopy: (id: string, text: string) => void;
+  onLeadUpdated: (id: string, patch: PatchLeadPayload) => void;
 }) {
+  const [pitch, setPitch] = useState(lead.draft_proposal);
+  const [busy, setBusy] = useState<'idle' | 'copy' | 'save'>('idle');
+  const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  useEffect(() => {
+    setPitch(lead.draft_proposal);
+    setNotice(null);
+  }, [lead.id, lead.draft_proposal]);
+
+  const pitchDirty = pitch !== lead.draft_proposal;
+
+  const applyPatch = async (payload: PatchLeadPayload): Promise<boolean> => {
+    const res = await patchLead(lead.id, payload);
+    if (res.ok) {
+      onLeadUpdated(lead.id, {
+        ...(res.data.status !== undefined ? { status: res.data.status } : {}),
+        ...(res.data.draft_proposal !== undefined
+          ? { draft_proposal: res.data.draft_proposal }
+          : {}),
+      });
+      return true;
+    }
+    setNotice({ kind: 'err', text: res.message });
+    return false;
+  };
+
+  const saveDraft = async () => {
+    setBusy('save');
+    setNotice(null);
+    const ok = await applyPatch({ draft_proposal: pitch });
+    setBusy('idle');
+    if (ok) setNotice({ kind: 'ok', text: 'Draft saved' });
+  };
+
+  const setStatus = async (status: LeadStatus) => {
+    setBusy('save');
+    setNotice(null);
+    await applyPatch({ status });
+    setBusy('idle');
+  };
+
+  const copyOnly = async () => {
+    setBusy('copy');
+    setNotice(null);
+    try {
+      await navigator.clipboard.writeText(pitch);
+      setNotice({ kind: 'ok', text: 'Pitch copied' });
+    } catch {
+      setNotice({ kind: 'err', text: 'Clipboard blocked' });
+    }
+    setBusy('idle');
+  };
+
+  const copyPitchAndOpen = async () => {
+    const url = lead.post_url || lead.author_url;
+    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+    setBusy('copy');
+    setNotice(null);
+    try {
+      await navigator.clipboard.writeText(pitch);
+    } catch {
+      setBusy('idle');
+      setNotice({ kind: 'err', text: 'Opened source, but clipboard blocked — pitch not copied' });
+      return;
+    }
+    const ok = await applyPatch({ status: 'contacted', draft_proposal: pitch });
+    setBusy('idle');
+    if (ok) {
+      setNotice({ kind: 'ok', text: 'Opened source · pitch copied · marked contacted' });
+    } else {
+      setNotice((n) =>
+        n ?? { kind: 'err', text: 'Opened source and copied, but status update failed' },
+      );
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="space-y-2">
@@ -344,6 +448,28 @@ function InspectorContent({
         <div className="flex items-center gap-3 font-mono text-[11px] text-[var(--text-muted)] tabular-nums">
           <span className={scoreTextClass(lead.score)}>{lead.score}/10</span>
           {lead.budget && <span>{lead.budget}</span>}
+          <StatusBadge status={lead.status} />
+        </div>
+        <div className="flex items-center gap-2 pt-1">
+          {lead.status === 'archived' ? (
+            <button
+              onClick={() => void setStatus('new')}
+              disabled={busy !== 'idle'}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-[var(--glass-border)] font-sans text-[10px] font-medium uppercase tracking-wide text-[var(--text-secondary)] transition-colors duration-[120ms] ease-out hover:text-[var(--text-primary)] hover:border-[var(--glass-border-hover)] disabled:opacity-50"
+            >
+              <ArchiveRestore className="w-3 h-3" strokeWidth={1.75} />
+              Restore to New
+            </button>
+          ) : (
+            <button
+              onClick={() => void setStatus('archived')}
+              disabled={busy !== 'idle'}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-[var(--glass-border)] font-sans text-[10px] font-medium uppercase tracking-wide text-[var(--text-secondary)] transition-colors duration-[120ms] ease-out hover:text-[var(--text-primary)] hover:border-[var(--glass-border-hover)] disabled:opacity-50"
+            >
+              <Archive className="w-3 h-3" strokeWidth={1.75} />
+              Archive
+            </button>
+          )}
         </div>
       </div>
 
@@ -373,34 +499,62 @@ function InspectorContent({
           <span className="font-sans text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
             {filter === 'contracts' ? 'Draft Pitch' : 'Cover Letter'}
           </span>
-          <button
-            onClick={() => onCopy(lead.id, lead.draft_proposal)}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border font-sans text-[11px] font-medium transition-colors duration-[120ms] ease-out ${
-              copyState === 'copied'
-                ? 'bg-emerald-400/15 border-emerald-400/30 text-emerald-200'
-                : copyState === 'error'
-                  ? 'bg-[rgba(141,153,174,0.06)] border-[var(--glass-border)] text-[var(--text-secondary)]'
-                  : 'bg-[rgba(141,153,174,0.1)] hover:bg-[rgba(141,153,174,0.16)] border-[var(--glass-border)] text-[var(--text-primary)]'
-            }`}
-          >
-            {copyState === 'copied' ? (
-              <>
-                <Check className="w-3.5 h-3.5" strokeWidth={1.75} />
-                Copied
-              </>
-            ) : copyState === 'error' ? (
-              'Clipboard blocked'
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5" strokeWidth={1.75} />
-                Copy Pitch
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => void copyOnly()}
+              disabled={busy !== 'idle'}
+              title="Copy pitch only"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--glass-border)] font-sans text-[11px] font-medium text-[var(--text-secondary)] transition-colors duration-[120ms] ease-out hover:text-[var(--text-primary)] hover:border-[var(--glass-border-hover)] disabled:opacity-50"
+            >
+              <Copy className="w-3.5 h-3.5" strokeWidth={1.75} />
+              Copy
+            </button>
+            <button
+              onClick={() => void copyPitchAndOpen()}
+              disabled={busy !== 'idle'}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-emerald-400/30 bg-emerald-400/15 font-sans text-[11px] font-medium text-emerald-200 transition-colors duration-[120ms] ease-out hover:bg-emerald-400/25 disabled:opacity-50"
+            >
+              {busy === 'copy' ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={1.75} />
+              ) : (
+                <Send className="w-3.5 h-3.5" strokeWidth={1.75} />
+              )}
+              Copy Pitch &amp; Open
+            </button>
+          </div>
         </div>
-        <p className="text-sm leading-relaxed text-[var(--text-secondary)] whitespace-pre-wrap">
-          {lead.draft_proposal}
-        </p>
+        <textarea
+          value={pitch}
+          onChange={(e) => setPitch(e.target.value)}
+          rows={10}
+          spellCheck={false}
+          className="glass-input w-full rounded-md px-3 py-2 font-sans text-[13px] leading-relaxed text-[var(--text-secondary)] resize-y"
+        />
+        <div className="flex items-center justify-between gap-3 min-h-6">
+          {pitchDirty ? (
+            <button
+              onClick={() => void saveDraft()}
+              disabled={busy !== 'idle'}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--glass-border)] bg-[rgba(141,153,174,0.1)] font-sans text-[11px] font-medium text-[var(--text-primary)] transition-colors duration-[120ms] ease-out hover:bg-[rgba(141,153,174,0.16)] disabled:opacity-50"
+            >
+              {busy === 'save' ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={1.75} />
+              ) : null}
+              Save Draft
+            </button>
+          ) : (
+            <span />
+          )}
+          {notice && (
+            <span
+              className={`font-sans text-[11px] ${
+                notice.kind === 'ok' ? 'text-emerald-300' : 'text-amber-300'
+              }`}
+            >
+              {notice.text}
+            </span>
+          )}
+        </div>
       </section>
     </div>
   );

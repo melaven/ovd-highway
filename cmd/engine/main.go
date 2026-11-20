@@ -192,7 +192,7 @@ func run() error {
 		sourceManager.Shutdown()
 		return nil
 	})
-	cpHandler := controlplane.NewHandler(repo, settingsStore, sourceManager, log)
+	cpHandler := controlplane.NewHandler(repo, repo, settingsStore, sourceManager, log)
 
 	// dispatchLead persists and broadcasts a qualified lead. Shared by
 	// the live leadStream consumer and the DLQ retry worker.

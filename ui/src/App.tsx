@@ -14,6 +14,7 @@ import {
   onUnauthorized,
   wsUrl,
 } from './lib/api';
+import type { PatchLeadPayload } from './lib/api';
 import { normalizeIncoming, type QualifiedLead } from './lib/leads';
 import type { EngineSettings, Source } from './types/controlPlane';
 
@@ -197,6 +198,18 @@ export default function App() {
 
   const refreshSources = () => setSourcesTick((k) => k + 1);
 
+  const handleLeadUpdated = (id: string, patch: PatchLeadPayload) => {
+    setLeads((prev) =>
+      prev.map((lead) => {
+        if (lead.id !== id) return lead;
+        const next = { ...lead };
+        if (patch.status !== undefined) next.status = patch.status;
+        if (patch.draft_proposal !== undefined) next.draft_proposal = patch.draft_proposal;
+        return next;
+      }),
+    );
+  };
+
   const sourcesCount =
     sourcesOffline || sourcesAuthRequired || sources === null ? null : sources.length;
   const minScore =
@@ -222,7 +235,9 @@ export default function App() {
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.14, ease: VIEW_EASE }}
             >
-              {view === 'stream' && <StreamView leads={leads} conn={conn} />}
+              {view === 'stream' && (
+                <StreamView leads={leads} conn={conn} onLeadUpdated={handleLeadUpdated} />
+              )}
               {view === 'sources' && (
                 <SourcesView
                   sources={sources}

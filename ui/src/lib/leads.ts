@@ -3,6 +3,14 @@
 
 import { extractOriginName, formatRelativeTime, getSourceFromSignal } from '../utils/formatters';
 
+export type LeadStatus = 'new' | 'contacted' | 'archived';
+
+const LEAD_STATUSES: readonly string[] = ['new', 'contacted', 'archived'];
+
+export function normalizeLeadStatus(value: unknown): LeadStatus {
+  return LEAD_STATUSES.includes(String(value)) ? (value as LeadStatus) : 'new';
+}
+
 export interface QualifiedLead {
   id: string;
   source: 'mtproto' | 'habr' | 'web' | 'reddit' | 'hh' | string;
@@ -19,6 +27,7 @@ export interface QualifiedLead {
   pain_summary: string;
   draft_proposal: string;
   job_type?: 'freelance' | 'vacancy' | string;
+  status: LeadStatus;
 }
 
 export interface RawQualifiedLead {
@@ -42,6 +51,7 @@ export interface RawQualifiedLead {
   tech_stack?: string[];
   job_type?: string;
   qualified_at?: string;
+  status?: string;
 }
 
 export function isRawLead(msg: unknown): msg is RawQualifiedLead {
@@ -87,11 +97,14 @@ export function normalizeRawLead(raw: RawQualifiedLead): QualifiedLead {
     pain_summary: String(qual.pain_points ?? ''),
     draft_proposal: String(qual.draft_proposal ?? ''),
     job_type: String(raw.job_type ?? sig.job_type ?? ''),
+    status: normalizeLeadStatus(raw.status),
   };
 }
 
 export function normalizeIncoming(msg: unknown): QualifiedLead | null {
-  if (isFlatLead(msg)) return msg;
+  if (isFlatLead(msg)) {
+    return { ...msg, status: normalizeLeadStatus(msg.status) };
+  }
   if (isRawLead(msg)) return normalizeRawLead(msg);
   return null;
 }
@@ -121,3 +134,12 @@ export const TRACK_TABS = [
 ] as const;
 
 export type TrackFilter = (typeof TRACK_TABS)[number]['val'];
+
+export const STATUS_FILTERS = [
+  { label: 'Active', val: 'new' },
+  { label: 'Contacted', val: 'contacted' },
+  { label: 'Archived', val: 'archived' },
+  { label: 'All', val: 'all' },
+] as const;
+
+export type StatusFilter = (typeof STATUS_FILTERS)[number]['val'];

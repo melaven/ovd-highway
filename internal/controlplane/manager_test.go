@@ -25,11 +25,15 @@ func discardLog() *slog.Logger {
 type fakeRepo struct {
 	mu       sync.Mutex
 	sources  map[string]Source
+	leads    map[string]LeadPatchResult
 	settings EngineSettings
 }
 
 func newFakeRepo() *fakeRepo {
-	return &fakeRepo{sources: make(map[string]Source)}
+	return &fakeRepo{
+		sources: make(map[string]Source),
+		leads:   make(map[string]LeadPatchResult),
+	}
 }
 
 func (r *fakeRepo) ListSources(context.Context) ([]Source, error) {
@@ -95,6 +99,33 @@ func (r *fakeRepo) PutSettings(_ context.Context, s EngineSettings) (EngineSetti
 	defer r.mu.Unlock()
 	r.settings = s
 	return s, nil
+}
+
+func (r *fakeRepo) UpdateLead(_ context.Context, id string, p UpdateLeadPayload) (LeadPatchResult, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return LeadPatchResult{}, ErrInvalidLeadID
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	lead, ok := r.leads[id]
+	if !ok {
+		return LeadPatchResult{}, ErrLeadNotFound
+	}
+	if p.Status != nil {
+		lead.Status = *p.Status
+	}
+	if p.DraftProposal != nil {
+		lead.DraftProposal = strings.TrimSpace(*p.DraftProposal)
+	}
+	lead.ID = id
+	r.leads[id] = lead
+	return lead, nil
+}
+
+func (r *fakeRepo) seedLead(id, status, draft string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.leads[id] = LeadPatchResult{ID: id, Status: status, DraftProposal: draft}
 }
 
 func (r *fakeRepo) seed(s Source) {

@@ -22,12 +22,23 @@ type SourceRepo interface {
 	PutSettings(ctx context.Context, s EngineSettings) (EngineSettings, error)
 }
 
+// LeadRepo is the persistence boundary for lead triage updates.
+type LeadRepo interface {
+	UpdateLead(ctx context.Context, id string, p UpdateLeadPayload) (LeadPatchResult, error)
+}
+
+// Store is the full control-plane persistence boundary.
+type Store interface {
+	SourceRepo
+	LeadRepo
+}
+
 type pgStore struct {
 	db *sql.DB
 }
 
-// NewPGStore wraps an initialized *sql.DB as a SourceRepo.
-func NewPGStore(db *sql.DB) SourceRepo {
+// NewPGStore wraps an initialized *sql.DB as a Store.
+func NewPGStore(db *sql.DB) Store {
 	return &pgStore{db: db}
 }
 
@@ -118,6 +129,54 @@ func (p *pgStore) DeleteSource(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// UpdateLead applies a validated patch to a highway_leads row. The
+// status column is authoritative for triage; draft_proposal is written
+// into the payload JSONB at the same path SaveLead marshals it to
+// (qualification.draft_proposal).
+func (p *pgStore) UpdateLead(ctx context.Context, id string, payload UpdateLeadPayload) (LeadPatchResult, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return LeadPatchResult{}, ErrInvalidLeadID
+	}
+
+	args := []any{id}
+	var sets []string
+	var payloadExpr string
+
+	if payload.Status != nil {
+		args = append(args, *payload.Status)
+		n := len(args)
+		sets = append(sets, fmt.Sprintf("status = $%d", n))
+		payloadExpr = fmt.Sprintf("jsonb_set(payload, '{status}', to_jsonb($%d::text), true)", n)
+	}
+	if payload.DraftProposal != nil {
+		args = append(args, strings.TrimSpace(*payload.DraftProposal))
+		n := len(args)
+		if payloadExpr == "" {
+			payloadExpr = fmt.Sprintf("jsonb_set(payload, '{qualification,draft_proposal}', to_jsonb($%d::text), true)", n)
+		} else {
+			payloadExpr = fmt.Sprintf("jsonb_set(%s, '{qualification,draft_proposal}', to_jsonb($%d::text), true)", payloadExpr, n)
+		}
+	}
+	if payloadExpr != "" {
+		sets = append(sets, "payload = "+payloadExpr)
+	}
+
+	query := fmt.Sprintf(
+		`UPDATE highway_leads SET %s WHERE id = $1::uuid
+		 RETURNING id::text, status, COALESCE(payload->'qualification'->>'draft_proposal', '')`,
+		strings.Join(sets, ", "),
+	)
+	var res LeadPatchResult
+	err := p.db.QueryRowContext(ctx, query, args...).Scan(&res.ID, &res.Status, &res.DraftProposal)
+	if errors.Is(err, sql.ErrNoRows) {
+		return LeadPatchResult{}, ErrLeadNotFound
+	}
+	if err != nil {
+		return LeadPatchResult{}, fmt.Errorf("update lead %q: %w", id, err)
+	}
+	return res, nil
 }
 
 func (p *pgStore) GetSettings(ctx context.Context) (EngineSettings, error) {
