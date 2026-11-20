@@ -106,14 +106,50 @@ type RedditConnector struct {
 	breaker  *breaker.Breaker
 }
 
+// NewRedditConnector polls the default r/forhire hiring feed.
 func NewRedditConnector() *RedditConnector {
+	return NewRedditConnectorFor("")
+}
+
+// NewRedditConnectorFor polls the /new.json feed of the given subreddit.
+// The target may be "foo", "r/foo", "/r/foo" or a full reddit URL path.
+func NewRedditConnectorFor(subreddit string) *RedditConnector {
+	endpoint := redditPostsURL
+	if sub := normalizeSubreddit(subreddit); sub != "" {
+		endpoint = "https://oauth.reddit.com/r/" + sub + "/new.json"
+	}
 	client := &http.Client{Timeout: 20 * time.Second}
 	return &RedditConnector{
 		client:   client,
-		endpoint: redditPostsURL,
+		endpoint: endpoint,
 		tokens:   newRedditTokenManager(client),
 		breaker:  breaker.New(breaker.Options{}),
 	}
+}
+
+// normalizeSubreddit extracts a bare subreddit name from common input
+// forms. Returns "" when the input cannot be a valid subreddit.
+func normalizeSubreddit(raw string) string {
+	name := strings.TrimSpace(raw)
+	name = strings.TrimPrefix(name, "https://www.reddit.com")
+	name = strings.TrimPrefix(name, "https://reddit.com")
+	name = strings.TrimPrefix(name, "http://www.reddit.com")
+	name = strings.TrimPrefix(name, "http://reddit.com")
+	name = strings.Trim(name, "/")
+	name = strings.TrimPrefix(name, "r/")
+	name = strings.TrimSuffix(name, "/new.json")
+	name = strings.TrimSuffix(name, "/new")
+	name = strings.TrimSuffix(name, "/")
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 21 {
+		return ""
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_') {
+			return ""
+		}
+	}
+	return name
 }
 
 func (r *RedditConnector) Name() string {
