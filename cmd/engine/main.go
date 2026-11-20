@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"ovd/internal/api"
+	"ovd/internal/controlplane"
 	"ovd/internal/domain"
 	"ovd/internal/lane"
 	"ovd/internal/onramp"
@@ -123,6 +124,18 @@ func run() error {
 		return fmt.Errorf("qualifier: %w", err)
 	}
 
+	// Control plane: persisted engine settings feed the qualifier live
+	// (system_prompt + min_score apply on the next incoming signal).
+	repo := controlplane.NewPGStore(db)
+	settingsStore := controlplane.NewSettingsStore(repo, controlplane.EngineSettings{
+		SystemPrompt: lane.DefaultSystemPrompt,
+		MinScore:     70,
+	}, log)
+	if err := settingsStore.Hydrate(ctx); err != nil {
+		return fmt.Errorf("hydrate engine settings: %w", err)
+	}
+	qualifier.SetSettingsProvider(settingsStore)
+
 	// Dead letter queue: archives failed LLM evaluations and releases
 	// their dedup keys so the retry worker can re-ingest them.
 	archiver, err := dlq.NewPostgresArchive(db)
@@ -143,11 +156,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("control bot: %w", err)
 	}
-	sources := []onramp.Connector{
-		mtprotoSrc,
-		onramp.NewRedditConnector(),
-		onramp.NewHHConnector(),
-	}
+	// hh/reddit connectors are no longer static: the control-plane
+	// SourceManager spawns them per enabled row in the sources table.
+	// mtprotoSrc stays always-on (single session); the manager drives
+	// its channel whitelist via TGWhitelist.
+	sources := []onramp.Connector{mtprotoSrc}
 	if os.Getenv("MOCK_ONRAMP") == "1" {
 		sources = append(sources, onramp.NewMockSource(log))
 	}
@@ -168,10 +181,23 @@ func run() error {
 		return nil
 	})
 
+	// Dynamic source lifecycle: hydrates enabled rows from the sources
+	// table and reconciles connector goroutines on every API mutation.
+	sourceManager := controlplane.NewSourceManager(gctx, repo, rawStream, mtprotoSrc, nil, log)
+	if err := sourceManager.Hydrate(gctx); err != nil {
+		return fmt.Errorf("hydrate sources: %w", err)
+	}
+	g.Go(func() error {
+		<-gctx.Done()
+		sourceManager.Shutdown()
+		return nil
+	})
+	cpHandler := controlplane.NewHandler(repo, settingsStore, sourceManager, log)
+
 	// dispatchLead persists and broadcasts a qualified lead. Shared by
 	// the live leadStream consumer and the DLQ retry worker.
 	dispatchLead := func(lead domain.QualifiedLead) error {
-		if lead.Qualification.IsRelevant && lead.Qualification.Score >= 7 {
+		if lead.Qualification.IsRelevant && float64(lead.Qualification.Score) >= settingsStore.MinScoreThreshold() {
 			if err := store.SaveLead(gctx, db, lead); err != nil {
 				return fmt.Errorf("save lead %s: %w", lead.Signal.ID, err)
 			}
@@ -214,13 +240,25 @@ func run() error {
 	if wsAddr == "" {
 		wsAddr = ":8080"
 	}
+
+	adminToken := os.Getenv("ADMIN_API_TOKEN")
+	if adminToken == "" {
+		log.Warn("ADMIN_API_TOKEN is not set — /api/v1 and /ws run without auth (dev mode)")
+	}
+
+	// CORS wraps the whole mux so OPTIONS preflight succeeds before auth.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		if adminToken != "" && !api.TokenEqual(api.WSQueryToken(r), adminToken) {
+			api.RejectWSAuth(w, r, log)
+			return
+		}
 		api.ServeWS(wsHub, w, r)
 	})
+	mux.Handle("/api/v1/", api.BearerAuth(adminToken)(cpHandler.Routes()))
 	httpSrv := &http.Server{
 		Addr:              wsAddr,
-		Handler:           mux,
+		Handler:           api.CORS(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	g.Go(func() error {

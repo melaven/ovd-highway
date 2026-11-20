@@ -33,6 +33,10 @@ const systemPrompt = `Ты — Senior Systems Architect и инженер по B
 ФОРМАТ ОТВЕТА: строго один JSON-объект, без markdown, тегов и комментариев:
 {"is_relevant": boolean, "score": integer 1-10 (10 = идеально под стек и B2B), "estimated_budget": string (из текста или "Не указан"), "pain_points": string (одно предложение: реальная бизнес-боль клиента), "draft_proposal": string (отклик или пустая строка), "tech_stack": ["Go", "PostgreSQL", ...] (до 6 канонических названий технологий из текста заказа, пустой массив [] если не указаны), "detected_job_type": "freelance" | "vacancy" | "other"}`
 
+// DefaultSystemPrompt is the built-in qualification prompt. It is used
+// when the control plane has no stored override.
+const DefaultSystemPrompt = systemPrompt
+
 func userMessage(text, jobType string) string {
 	if jobType == "" {
 		jobType = "unknown"

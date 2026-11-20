@@ -27,6 +27,18 @@ const (
 	minProposal   = 7
 )
 
+// SettingsProvider supplies live engine settings (system prompt and
+// minimum score threshold) managed by the control plane. It is read on
+// every evaluation so updates apply to the next incoming signal
+// without a restart. Implemented by controlplane.SettingsStore.
+type SettingsProvider interface {
+	// SystemPrompt returns the prompt override; empty means default.
+	SystemPrompt() string
+	// MinScoreThreshold returns the lead acceptance threshold on the
+	// LLM's 1-10 score scale (control-plane min_score is 0-100).
+	MinScoreThreshold() float64
+}
+
 type Qualifier struct {
 	llm            Completer
 	workers        int
@@ -35,6 +47,7 @@ type Qualifier struct {
 	releaser       SignalReleaser
 	breaker        *breaker.Breaker
 	failureHandler FailureHandler
+	settings       SettingsProvider
 }
 
 type SignalReleaser interface {
@@ -81,11 +94,38 @@ func (q *Qualifier) SetFailureHandler(h FailureHandler) {
 	q.failureHandler = h
 }
 
+// SetSettingsProvider wires the live control-plane settings source.
+// Pass nil to revert to the built-in defaults.
+func (q *Qualifier) SetSettingsProvider(p SettingsProvider) {
+	q.settings = p
+}
+
 // SetBreaker overrides the default circuit breaker (tests).
 func (q *Qualifier) SetBreaker(b *breaker.Breaker) {
 	if b != nil {
 		q.breaker = b
 	}
+}
+
+// systemPromptNow resolves the prompt for the next LLM call.
+func (q *Qualifier) systemPromptNow() string {
+	if q.settings != nil {
+		if p := strings.TrimSpace(q.settings.SystemPrompt()); p != "" {
+			return p
+		}
+	}
+	return systemPrompt
+}
+
+// minScoreThresholdNow resolves the acceptance threshold on the 1-10
+// score scale. Defaults to minProposal when no provider is wired.
+func (q *Qualifier) minScoreThresholdNow() float64 {
+	if q.settings != nil {
+		if t := q.settings.MinScoreThreshold(); t >= 0 {
+			return t
+		}
+	}
+	return minProposal
 }
 
 // Run blocks until ctx is cancelled or in is closed and drained.
@@ -179,7 +219,7 @@ func (q *Qualifier) qualify(ctx context.Context, sig domain.RawSignal) (domain.Q
 	if err != nil {
 		return domain.Qualification{}, fmt.Errorf("parse llm output: %w", err)
 	}
-	qual = normalize(qual)
+	qual = normalize(qual, q.minScoreThresholdNow())
 	if qual.DetectedJobType == "other" {
 		// Garbage (CVs, course ads, spam): drop silently before it reaches WS.
 		qual.IsRelevant = false
@@ -192,7 +232,7 @@ func (q *Qualifier) qualify(ctx context.Context, sig domain.RawSignal) (domain.Q
 // leadFrom applies the relevance thresholds and builds the lead.
 // ok=false means the signal was evaluated but rejected.
 func (q *Qualifier) leadFrom(sig domain.RawSignal, qual domain.Qualification) (domain.QualifiedLead, bool) {
-	if !qual.IsRelevant || qual.Score < minProposal {
+	if !qual.IsRelevant || float64(qual.Score) < q.minScoreThresholdNow() {
 		return domain.QualifiedLead{}, false
 	}
 	jobType := sig.JobType
@@ -272,7 +312,7 @@ func (q *Qualifier) callOnce(ctx context.Context, text, jobType string) (string,
 	var callErr error
 	err := q.breaker.Execute(func() error {
 		var e error
-		raw, e = q.llm.Complete(ctx, systemPrompt, userMessage(text, jobType))
+		raw, e = q.llm.Complete(ctx, q.systemPromptNow(), userMessage(text, jobType))
 		callErr = e
 		if e != nil && !isRetryable(e) {
 			// Permanent errors (e.g. HTTP 400) must not trip the breaker.
@@ -317,11 +357,11 @@ func parseQualification(raw string) (domain.Qualification, error) {
 }
 
 // normalize enforces the invariants the prompt only requests.
-func normalize(qual domain.Qualification) domain.Qualification {
+func normalize(qual domain.Qualification, proposalThreshold float64) domain.Qualification {
 	if qual.Score < minRelevant {
 		qual.IsRelevant = false
 	}
-	if !qual.IsRelevant || qual.Score < minProposal {
+	if !qual.IsRelevant || float64(qual.Score) < proposalThreshold {
 		qual.DraftProposal = ""
 	}
 	if strings.TrimSpace(qual.EstimatedBudget) == "" {

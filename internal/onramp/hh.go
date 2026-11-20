@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -31,7 +32,19 @@ type HHConnector struct {
 	breaker  *breaker.Breaker
 }
 
+// NewHHConnector polls the default developer vacancy search.
 func NewHHConnector() *HHConnector {
+	return NewHHConnectorFor("developer")
+}
+
+// NewHHConnectorFor polls hh.ru vacancies matching the given search
+// query. The query becomes the `text` parameter of the vacancies API.
+func NewHHConnectorFor(query string) *HHConnector {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		q = "developer"
+	}
+	endpoint := "https://api.hh.ru/vacancies?text=" + url.QueryEscape(q) + "&per_page=10"
 	return &HHConnector{
 		client: &http.Client{
 			Timeout: hhRequestTimeout,
@@ -39,7 +52,7 @@ func NewHHConnector() *HHConnector {
 				Proxy: nil,
 			},
 		},
-		endpoint: hhVacanciesURL,
+		endpoint: endpoint,
 		breaker:  breaker.New(breaker.Options{}),
 	}
 }

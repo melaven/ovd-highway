@@ -120,6 +120,40 @@ func Init(ctx context.Context, databaseURL string) (*sql.DB, error) {
 				initErr = errors.Join(initErr, fmt.Errorf("close failed connection: %w", closeErr))
 			}
 		}
+		sourcesDDL := `
+		CREATE TABLE IF NOT EXISTS sources (
+			id         VARCHAR(64) PRIMARY KEY,
+			type       VARCHAR(20) NOT NULL CHECK (type IN ('tg', 'hh', 'reddit')),
+			target     TEXT         NOT NULL,
+			enabled    BOOLEAN      NOT NULL DEFAULT TRUE,
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		)`
+		if _, err := db.ExecContext(ctx, sourcesDDL); err != nil {
+			closeErr := db.Close()
+			db = nil
+			initErr = fmt.Errorf("create sources table: %w", err)
+			if closeErr != nil {
+				initErr = errors.Join(initErr, fmt.Errorf("close failed connection: %w", closeErr))
+			}
+			return
+		}
+
+		settingsDDL := `
+		CREATE TABLE IF NOT EXISTS engine_settings (
+			id            SMALLINT PRIMARY KEY CHECK (id = 1),
+			system_prompt TEXT         NOT NULL,
+			min_score     INT          NOT NULL,
+			updated_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		)`
+		if _, err := db.ExecContext(ctx, settingsDDL); err != nil {
+			closeErr := db.Close()
+			db = nil
+			initErr = fmt.Errorf("create engine_settings table: %w", err)
+			if closeErr != nil {
+				initErr = errors.Join(initErr, fmt.Errorf("close failed connection: %w", closeErr))
+			}
+		}
+
 	})
 
 	if initErr != nil {
