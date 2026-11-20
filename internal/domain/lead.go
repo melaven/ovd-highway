@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type RawSignal struct {
 	ID         string    `json:"id"`
@@ -22,9 +25,26 @@ type Qualification struct {
 	DetectedJobType string   `json:"detected_job_type"` // "freelance" | "vacancy" | "other"
 }
 
+// Lead triage statuses tracked by the control plane.
+const (
+	LeadStatusNew       = "new"
+	LeadStatusContacted = "contacted"
+	LeadStatusArchived  = "archived"
+)
+
+// ValidLeadStatus reports whether s is a known lead status.
+func ValidLeadStatus(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case LeadStatusNew, LeadStatusContacted, LeadStatusArchived:
+		return true
+	}
+	return false
+}
+
 type QualifiedLead struct {
 	Signal        RawSignal     `json:"signal"`
 	Qualification Qualification `json:"qualification"`
 	QualifiedAt   time.Time     `json:"qualified_at"`
 	JobType       string        `json:"job_type"` // "freelance" | "vacancy", mirrored from Signal.JobType
+	Status        string        `json:"status,omitempty"`
 }
