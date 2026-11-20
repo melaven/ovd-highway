@@ -12,9 +12,22 @@ import type {
   UpdateSourcePayload,
 } from '../types/controlPlane';
 
+const env = (import.meta as { env?: Record<string, string | undefined> }).env;
+
 const TOKEN_KEY = 'ovd_admin_token';
-const API_BASE = '/api/v1';
-export const WS_BASE_URL = 'ws://localhost:8080/ws';
+const API_BASE = (env?.VITE_API_BASE?.trim() || '/api/v1').replace(/\/+$/, '');
+
+function defaultWsBaseUrl(): string {
+  const configured = env?.VITE_WS_URL?.trim();
+  if (configured) return configured;
+  if (typeof window !== 'undefined' && window.location?.host) {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}/ws`;
+  }
+  return 'ws://localhost:8080/ws';
+}
+
+export const WS_BASE_URL = defaultWsBaseUrl();
 
 export function getAdminToken(): string | null {
   try {
@@ -163,7 +176,9 @@ export function putSettings(
   });
 }
 
-/** True when the failure means "endpoint not implemented / unreachable". */
+/** True when the failure means "endpoint not implemented / unreachable / 5xx". */
 export function isOfflineResult(result: { ok: boolean; status?: number }): boolean {
-  return !result.ok && (result.status === 404 || result.status === 0);
+  if (result.ok) return false;
+  const s = result.status ?? 0;
+  return s === 0 || s === 404 || s >= 500;
 }

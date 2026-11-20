@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Loader2, Pause, Play, Plus, Server, Trash2 } from 'lucide-react';
+import { KeyRound, Loader2, Pause, Play, Plus, Server, Trash2 } from 'lucide-react';
 import {
   createSource,
   deleteSource,
@@ -14,8 +14,10 @@ const ROW_MOTION = { duration: 0.14, ease: 'easeOut' as const };
 interface SourcesViewProps {
   sources: Source[] | null;
   offline: boolean;
+  authRequired: boolean;
   loading: boolean;
   onChanged: () => void;
+  onOpenTokenLock: () => void;
 }
 
 const TYPE_OPTIONS: { value: SourceType; label: string }[] = [
@@ -37,7 +39,14 @@ function typeBadgeClass(type: SourceType): string {
   }
 }
 
-export default function SourcesView({ sources, offline, loading, onChanged }: SourcesViewProps) {
+export default function SourcesView({
+  sources,
+  offline,
+  authRequired,
+  loading,
+  onChanged,
+  onOpenTokenLock,
+}: SourcesViewProps) {
   const [type, setType] = useState<SourceType>('tg');
   const [target, setTarget] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -141,7 +150,7 @@ export default function SourcesView({ sources, offline, loading, onChanged }: So
         />
         <button
           onClick={() => void handleAdd()}
-          disabled={busy === 'add' || offline}
+          disabled={busy === 'add' || offline || authRequired}
           className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md bg-[rgba(141,153,174,0.18)] hover:bg-[rgba(141,153,174,0.26)] border border-[var(--glass-border-hover)] font-sans text-xs font-medium text-[var(--text-primary)] transition-colors duration-[120ms] ease-out disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {busy === 'add' ? (
@@ -165,7 +174,20 @@ export default function SourcesView({ sources, offline, loading, onChanged }: So
 
       {/* Sources table */}
       <div className="glass-panel rounded-lg overflow-hidden shrink-0">
-        {offline ? (
+        {authRequired ? (
+          <div className="px-4 py-8 flex flex-col items-center gap-3">
+            <p className="font-sans text-xs text-amber-200/90">
+              Authentication required to manage Control Plane sources
+            </p>
+            <button
+              onClick={onOpenTokenLock}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[rgba(141,153,174,0.18)] hover:bg-[rgba(141,153,174,0.26)] border border-[var(--glass-border-hover)] font-sans text-xs font-medium text-[var(--text-primary)] transition-colors duration-[120ms] ease-out"
+            >
+              <KeyRound className="w-3.5 h-3.5" strokeWidth={1.75} />
+              Unlock with Token
+            </button>
+          </div>
+        ) : offline ? (
           <div className="px-4 py-8 flex flex-col items-center gap-2">
             <p className="font-sans text-xs text-[var(--text-muted)]">
               Control Plane API endpoint offline / awaiting backend
@@ -235,7 +257,7 @@ export default function SourcesView({ sources, offline, loading, onChanged }: So
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => void handleToggle(s)}
-                          disabled={busy !== null || offline}
+                          disabled={busy !== null || offline || authRequired}
                           title={s.enabled ? 'Pause source' : 'Resume source'}
                           className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[rgba(141,153,174,0.1)] transition-colors duration-[120ms] ease-out disabled:opacity-40"
                         >
@@ -249,7 +271,7 @@ export default function SourcesView({ sources, offline, loading, onChanged }: So
                         </button>
                         <button
                           onClick={() => void handleDelete(s)}
-                          disabled={busy !== null || offline}
+                          disabled={busy !== null || offline || authRequired}
                           title="Delete source"
                           className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-red-300 hover:bg-[rgba(141,153,174,0.1)] transition-colors duration-[120ms] ease-out disabled:opacity-40"
                         >

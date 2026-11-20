@@ -33,14 +33,17 @@ export default function App() {
   const [conn, setConn] = useState<ConnState>('connecting');
   const [wsNonce, setWsNonce] = useState(0);
   const [tokenTick, setTokenTick] = useState(0);
+  const [sourcesTick, setSourcesTick] = useState(0);
 
   const [sources, setSources] = useState<Source[] | null>(null);
   const [sourcesLoading, setSourcesLoading] = useState(true);
   const [sourcesOffline, setSourcesOffline] = useState(false);
+  const [sourcesAuthRequired, setSourcesAuthRequired] = useState(false);
 
   const [settings, setSettings] = useState<EngineSettings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsOffline, setSettingsOffline] = useState(false);
+  const [settingsAuthRequired, setSettingsAuthRequired] = useState(false);
 
   const [tokenOpen, setTokenOpen] = useState(false);
   const [tokenReason, setTokenReason] = useState<string | undefined>(undefined);
@@ -53,23 +56,54 @@ export default function App() {
     setTokenOpen(true);
   }), []);
 
-  // Control Plane REST hydration — refetches whenever the token changes.
+  // Sources hydration — refetches on token change OR local CRUD mutations.
   useEffect(() => {
     let disposed = false;
     setSourcesLoading(true);
-    setSettingsLoading(true);
 
     void listSources().then((r) => {
       if (disposed) return;
-      setSourcesOffline(!r.ok);
-      setSources(r.ok ? (r.data ?? []) : null);
+      if (r.ok) {
+        setSources(r.data ?? []);
+        setSourcesOffline(false);
+        setSourcesAuthRequired(false);
+      } else if (r.status === 401) {
+        setSources(null);
+        setSourcesOffline(false);
+        setSourcesAuthRequired(true);
+      } else {
+        setSources(null);
+        setSourcesOffline(isOfflineResult(r) || !r.ok);
+        setSourcesAuthRequired(false);
+      }
       setSourcesLoading(false);
     });
 
+    return () => {
+      disposed = true;
+    };
+  }, [tokenTick, sourcesTick]);
+
+  // Settings hydration — refetches only when the token changes.
+  useEffect(() => {
+    let disposed = false;
+    setSettingsLoading(true);
+
     void getSettings().then((r) => {
       if (disposed) return;
-      setSettingsOffline(!r.ok || isOfflineResult(r));
-      setSettings(r.ok ? (r.data ?? null) : null);
+      if (r.ok) {
+        setSettings(r.data ?? null);
+        setSettingsOffline(false);
+        setSettingsAuthRequired(false);
+      } else if (r.status === 401) {
+        setSettings(null);
+        setSettingsOffline(false);
+        setSettingsAuthRequired(true);
+      } else {
+        setSettings(null);
+        setSettingsOffline(isOfflineResult(r) || !r.ok);
+        setSettingsAuthRequired(false);
+      }
       setSettingsLoading(false);
     });
 
@@ -161,8 +195,12 @@ export default function App() {
     setTokenOpen(true);
   };
 
-  const sourcesCount = sourcesOffline ? null : sources === null ? null : sources.length;
-  const minScore = settings && !settingsOffline ? settings.min_score : null;
+  const refreshSources = () => setSourcesTick((k) => k + 1);
+
+  const sourcesCount =
+    sourcesOffline || sourcesAuthRequired || sources === null ? null : sources.length;
+  const minScore =
+    settings && !settingsOffline && !settingsAuthRequired ? settings.min_score : null;
 
   return (
     <MotionConfig reducedMotion="user">
@@ -189,18 +227,23 @@ export default function App() {
                 <SourcesView
                   sources={sources}
                   offline={sourcesOffline}
+                  authRequired={sourcesAuthRequired}
                   loading={sourcesLoading}
-                  onChanged={bumpToken}
+                  onChanged={refreshSources}
+                  onOpenTokenLock={openTokenLock}
                 />
               )}
               {view === 'rules' && (
                 <RulesView
                   settings={settings}
                   offline={settingsOffline}
+                  authRequired={settingsAuthRequired}
                   loading={settingsLoading}
+                  onOpenTokenLock={openTokenLock}
                   onSaved={(s) => {
                     setSettings(s);
                     setSettingsOffline(false);
+                    setSettingsAuthRequired(false);
                   }}
                 />
               )}
