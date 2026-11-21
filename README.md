@@ -93,6 +93,13 @@ go test -race ./...
 
 GitHub Actions runs backend tests with the race detector, cross-compiles the Linux binary, and builds the UI on every push/PR to `main` — see [`.github/workflows/ci.yml`](./.github/workflows/ci.yml).
 
+### Health & Readiness Probes
+
+The engine exposes two unauthenticated probe endpoints on the same HTTP server as the WebSocket (`WS_ADDR`, default `:8080`):
+
+- `GET /healthz` — process liveness. Always returns `200 OK` with `{"status":"ok"}` while the process is running.
+- `GET /readyz` — dependency readiness. Pings PostgreSQL and Redis (2s timeout per check). Returns `200 OK` with `{"status":"ready","checks":{"postgres":"ok","redis":"ok"}}` when all dependencies are healthy, or `503 Service Unavailable` with `{"status":"not_ready","checks":{...}}` where a failing check maps to its error text.
+
 ## License
 
 This project is licensed under the [MIT License](./LICENSE) — © 2026 Maxim Kadochnikov.

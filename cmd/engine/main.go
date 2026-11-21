@@ -248,6 +248,15 @@ func run() error {
 
 	// CORS wraps the whole mux so OPTIONS preflight succeeds before auth.
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", api.HealthzHandler)
+	mux.HandleFunc("GET /readyz", api.ReadyzHandler(map[string]api.ReadinessChecker{
+		"postgres": func(ctx context.Context) error {
+			return store.Ping(ctx, db)
+		},
+		"redis": func(ctx context.Context) error {
+			return rdb.Ping(ctx).Err()
+		},
+	}))
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		if adminToken != "" && !api.TokenEqual(api.WSQueryToken(r), adminToken) {
 			api.RejectWSAuth(w, r, log)
@@ -260,6 +269,7 @@ func run() error {
 		Addr:              wsAddr,
 		Handler:           api.CORS(mux),
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	g.Go(func() error {
 		<-gctx.Done()
@@ -285,9 +295,6 @@ func run() error {
 	g.Go(func() error {
 		controlBot.Run(gctx)
 		return nil
-	})
-	g.Go(func() error {
-		return dlqWorker.Run(gctx)
 	})
 	g.Go(stage(dedupStream, func() error { return dedup.Run(gctx, rawStream, dedupStream) }))
 	g.Go(stage(leadStream, func() error { return qualifier.Run(gctx, dedupStream, leadStream) }))

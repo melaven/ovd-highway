@@ -264,6 +264,23 @@ func GetRecentLeads(ctx context.Context, limit int) ([]domain.QualifiedLead, err
 	return leads, nil
 }
 
+// Ping verifies the database is reachable. When ctx has no deadline a
+// 2-second timeout is applied so readiness probes stay bounded.
+func Ping(ctx context.Context, db *sql.DB) error {
+	if ctx == nil {
+		return errors.New("database context is required")
+	}
+	if db == nil {
+		return errors.New("database connection is required")
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+	}
+	return db.PingContext(ctx)
+}
+
 func decodeRecentLead(
 	id, track, source string,
 	score int,

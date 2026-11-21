@@ -1,10 +1,17 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
 )
+
+func TestPingNilDB(t *testing.T) {
+	if err := Ping(context.Background(), nil); err == nil {
+		t.Fatal("Ping with nil db returned nil error, want non-nil")
+	}
+}
 
 func TestDecodeRecentLead(t *testing.T) {
 	createdAt := time.Date(2026, time.November, 17, 10, 0, 0, 0, time.UTC)
