@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"time"
+
+	"ovd/internal/metrics"
 )
 
 // RetryRecord is a dead-letter row due for reprocessing.
@@ -183,16 +185,20 @@ func (w *Worker) processOne(ctx context.Context, rec RetryRecord) {
 		}
 		next := w.nextRetryAt(rec.RetryCount)
 		if err := w.store.Fail(ctx, rec.ID, rec.RetryCount+1, next, err.Error()); err != nil {
+			metrics.IncDLQStoreError()
 			w.log.Error("mark dead letter retry failed", "id", rec.ID, "err", err)
 			return
 		}
+		metrics.IncDLQRetryScheduled()
 		w.log.Warn("dead letter retry scheduled", "id", rec.ID, "retry", rec.RetryCount+1, "next", next, "err", err)
 		return
 	}
 	if err := w.store.Resolve(ctx, rec.ID); err != nil {
+		metrics.IncDLQStoreError()
 		w.log.Error("resolve dead letter failed", "id", rec.ID, "err", err)
 		return
 	}
+	metrics.IncDLQResolved()
 	w.log.Info("dead letter resolved", "id", rec.ID, "source", rec.Source)
 }
 
