@@ -23,6 +23,7 @@ import (
 	"ovd/internal/controlplane"
 	"ovd/internal/domain"
 	"ovd/internal/lane"
+	"ovd/internal/metrics"
 	"ovd/internal/onramp"
 	"ovd/internal/pipeline/dlq"
 	"ovd/internal/store"
@@ -199,10 +200,15 @@ func run() error {
 	dispatchLead := func(lead domain.QualifiedLead) error {
 		if lead.Qualification.IsRelevant && float64(lead.Qualification.Score) >= settingsStore.MinScoreThreshold() {
 			if err := store.SaveLead(gctx, db, lead); err != nil {
+				metrics.IncDispatchError()
 				return fmt.Errorf("save lead %s: %w", lead.Signal.ID, err)
 			}
 			wsHub.Broadcast(lead)
+			metrics.IncLeadSaved()
+		} else {
+			metrics.IncLeadDropped()
 		}
+		metrics.IncLeadDispatched()
 		log.Debug("lead dispatched", "score", lead.Qualification.Score)
 		return nil
 	}
@@ -257,6 +263,7 @@ func run() error {
 			return rdb.Ping(ctx).Err()
 		},
 	}))
+	mux.HandleFunc("GET /metrics", api.MetricsHandler(metrics.Default()))
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		if adminToken != "" && !api.TokenEqual(api.WSQueryToken(r), adminToken) {
 			api.RejectWSAuth(w, r, log)
