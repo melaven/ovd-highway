@@ -1,0 +1,16 @@
+.git
+.github
+.env
+session.json
+*.exe
+bin/
+coverage.out
+
+node_modules
+ui/node_modules
+ui/dist
+
+engine.exe
+docs
+scripts
+migrations
