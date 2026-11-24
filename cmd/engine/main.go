@@ -272,6 +272,9 @@ func run() error {
 		api.ServeWS(wsHub, w, r)
 	})
 	mux.Handle("/api/v1/", api.BearerAuth(adminToken)(cpHandler.Routes()))
+	// SPA fallback: any unmatched GET serves the embedded Control Plane
+	// build; unknown /api/* and /ws paths get a strict 404.
+	mux.Handle("/", api.UIHandler())
 	httpSrv := &http.Server{
 		Addr:              wsAddr,
 		Handler:           api.CORS(mux),
