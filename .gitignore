@@ -30,7 +30,11 @@ session.json
 # UI build artifacts and dependencies
 node_modules/
 ui/node_modules/
-ui/dist/
+# Keep the SPA placeholder so `go test -race ./...` compiles in CI before
+# `npm run build` has produced real assets.
+ui/dist/*
+!ui/dist/
+!ui/dist/index.html
 
 # Editor/IDE
 # .idea/
