@@ -100,6 +100,14 @@ The engine exposes two unauthenticated probe endpoints on the same HTTP server a
 - `GET /healthz` — process liveness. Always returns `200 OK` with `{"status":"ok"}` while the process is running.
 - `GET /readyz` — dependency readiness. Pings PostgreSQL and Redis (2s timeout per check). Returns `200 OK` with `{"status":"ready","checks":{"postgres":"ok","redis":"ok"}}` when all dependencies are healthy, or `503 Service Unavailable` with `{"status":"not_ready","checks":{...}}` where a failing check maps to its error text.
 
+## API Authentication & Environment Notes
+
+- **Control Plane auth** — all `/api/v1/*` routes and the `/ws` upgrade require `Authorization: Bearer <ADMIN_API_TOKEN>` (WebSocket clients pass it as `?token=`; missing/invalid tokens get `401`, and WS closes with code `4401`). Comparison is constant-time. Leave `ADMIN_API_TOKEN` empty only for local development — never in production.
+- **Unauthenticated endpoints** — `/healthz`, `/readyz`, and `/metrics` are intentionally public for probes and scraping.
+- **LLM qualifier** — `LLM_API_KEY` is required; `LLM_BASE_URL` switches from the default OpenRouter endpoint to any OpenAI-compatible API (e.g. `https://api.claudehub.fun/v1`), and `LLM_MODEL` overrides the default model slug.
+- **HTTP server** — `WS_ADDR` sets the listen address (default `:8080`); `WS_ALLOWED_ORIGINS` extends the WebSocket origin allowlist beyond localhost.
+- **Secrets** — copy `.env.example` to `.env` and fill in real values; `.env`, `session.json`, and `*.session` are git-ignored and must never be committed.
+
 ## License
 
 This project is licensed under the [MIT License](./LICENSE) — © 2026 Maxim Kadochnikov.

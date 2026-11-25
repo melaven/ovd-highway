@@ -12,6 +12,12 @@
 - [ ] `CHANGELOG.md` updated if the change is user-visible
 - [ ] No secrets, tokens, or `.env` contents committed
 
+## Test plan
+
+<!-- How was this verified? e.g. `go test -race ./...`, `scripts/smoke.ps1`, manual UI check -->
+
+- [ ] Verified locally
+
 ## Notes
 
 <!-- Migration steps, rollout order, known limitations -->

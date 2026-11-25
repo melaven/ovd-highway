@@ -5,6 +5,14 @@ All notable changes to OVD // Highway are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Fixed
+
 ## [1.0.0] — 2026-11-23
 
 First stable release of the zero-blocking multi-protocol ingestion and AI qualification engine.

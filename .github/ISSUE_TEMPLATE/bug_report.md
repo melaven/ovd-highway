@@ -25,6 +25,8 @@ labels: bug
 
 ## Environment
 
+- Affected component: engine / UI dashboard / docker / docs / CI
+- Version or commit (`git rev-parse --short HEAD`):
 - OS:
 - Go version (`go version`):
 - Node version (`node -v`) if UI-related:
