@@ -242,6 +242,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("dlq retry store: %w", err)
 	}
+	cpHandler.SetDLQAdmin(retryStore)
 	dlqWorker, err := dlq.NewWorker(retryStore, func(ctx context.Context, rec dlq.RetryRecord) error {
 		var sig domain.RawSignal
 		if err := json.Unmarshal(rec.Payload, &sig); err != nil {
