@@ -2,6 +2,7 @@ package onramp
 
 import (
 	"bufio"
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -46,6 +47,74 @@ type MTProtoSource struct {
 	allowed   map[int64]string // channelID -> username
 	tgAPI     atomic.Pointer[tg.Client]
 	breaker   *breaker.Breaker
+	grouped   *groupedSeenCache
+}
+
+// groupedSeenTTL and groupedSeenMax bound the album dedup cache: album
+// frames arrive within seconds, so 10 minutes is generous, and 4096
+// entries cap memory for 24/7 operation.
+const (
+	groupedSeenTTL = 10 * time.Minute
+	groupedSeenMax = 4096
+)
+
+// groupedSeenCache remembers album GroupedIDs already emitted so only the
+// first captioned frame of a Telegram album becomes a signal. Entries are
+// ordered by last-seen time (LRU); expired entries form a suffix and are
+// evicted on write, keeping the cache bounded without a background sweeper.
+type groupedSeenCache struct {
+	ttl   time.Duration
+	max   int
+	mu    sync.Mutex
+	lru   *list.List // front = most recently seen
+	items map[int64]*list.Element
+}
+
+type groupedSeenEntry struct {
+	gid int64
+	at  time.Time
+}
+
+func newGroupedSeenCache(ttl time.Duration, max int) *groupedSeenCache {
+	return &groupedSeenCache{
+		ttl:   ttl,
+		max:   max,
+		lru:   list.New(),
+		items: make(map[int64]*list.Element),
+	}
+}
+
+// checkAndRecord reports whether gid was already seen within the TTL
+// window; otherwise it records gid and returns false.
+func (c *groupedSeenCache) checkAndRecord(gid int64, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for back := c.lru.Back(); back != nil; back = c.lru.Back() {
+		entry := back.Value.(*groupedSeenEntry)
+		if now.Sub(entry.at) <= c.ttl {
+			break
+		}
+		c.lru.Remove(back)
+		delete(c.items, entry.gid)
+	}
+
+	if el, ok := c.items[gid]; ok {
+		entry := el.Value.(*groupedSeenEntry)
+		entry.at = now
+		c.lru.MoveToFront(el)
+		return true
+	}
+
+	if len(c.items) >= c.max {
+		if back := c.lru.Back(); back != nil {
+			entry := back.Value.(*groupedSeenEntry)
+			c.lru.Remove(back)
+			delete(c.items, entry.gid)
+		}
+	}
+	c.items[gid] = c.lru.PushFront(&groupedSeenEntry{gid: gid, at: now})
+	return false
 }
 
 func NewMTProtoSource(apiID int, apiHash, phone, sessionFile string, log *slog.Logger) *MTProtoSource {
@@ -57,6 +126,7 @@ func NewMTProtoSource(apiID int, apiHash, phone, sessionFile string, log *slog.L
 		log:         log.With("component", "mtproto_onramp"),
 		allowed:     make(map[int64]string),
 		breaker:     breaker.New(breaker.Options{}),
+		grouped:     newGroupedSeenCache(groupedSeenTTL, groupedSeenMax),
 	}
 }
 
@@ -183,7 +253,14 @@ func (m *MTProtoSource) handleMessage(ctx context.Context, msg tg.MessageClass, 
 	}
 
 	text := message.GetMessage()
-	if text == "" {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+
+	// Album frames share GroupedID; only the first captioned frame is
+	// emitted. Empty frames return above, so they never reserve the ID.
+	if gid, ok := message.GetGroupedID(); ok && gid != 0 && m.grouped.checkAndRecord(gid, time.Now()) {
+		m.log.Debug("album duplicate dropped", "grouped_id", gid)
 		return
 	}
 

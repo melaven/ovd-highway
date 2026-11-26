@@ -1,6 +1,16 @@
 package onramp
 
-import "testing"
+import (
+	"context"
+	"io"
+	"log/slog"
+	"testing"
+	"time"
+
+	"github.com/gotd/td/tg"
+
+	"ovd/internal/domain"
+)
 
 func TestSanitizeChannelInput(t *testing.T) {
 	tests := []struct {
@@ -66,5 +76,92 @@ func TestParseTargetChannelsSanitizesMarkdownLinks(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("parseTargetChannels()[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func newTestMTProtoSource(t *testing.T) *MTProtoSource {
+	t.Helper()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := NewMTProtoSource(1, "hash", "+10000000000", "session.test.json", log)
+	m.allowedMu.Lock()
+	m.allowed[12345] = "testchan"
+	m.allowedMu.Unlock()
+	return m
+}
+
+func albumMsg(text string, gid int64) *tg.Message {
+	msg := &tg.Message{
+		ID:      1,
+		PeerID:  &tg.PeerChannel{ChannelID: 12345},
+		Message: text,
+	}
+	if gid != 0 {
+		msg.SetGroupedID(gid)
+	}
+	return msg
+}
+
+func TestHandleMessageDropsEmptyMediaPost(t *testing.T) {
+	m := newTestMTProtoSource(t)
+	out := make(chan domain.RawSignal, 1)
+
+	m.handleMessage(context.Background(), albumMsg("", 0), out)
+	m.handleMessage(context.Background(), albumMsg("   ", 0), out)
+
+	if len(out) != 0 {
+		t.Fatalf("empty media posts emitted %d signals, want 0", len(out))
+	}
+}
+
+func TestHandleMessageAlbumDedup(t *testing.T) {
+	m := newTestMTProtoSource(t)
+	out := make(chan domain.RawSignal, 4)
+	ctx := context.Background()
+
+	// First album frame has no caption: dropped AND must not reserve gid.
+	m.handleMessage(ctx, albumMsg("", 7), out)
+	// Second frame carries the caption: emitted.
+	m.handleMessage(ctx, albumMsg("real caption", 7), out)
+	// Third frame in the same album: duplicate text/frame, dropped.
+	m.handleMessage(ctx, albumMsg("another caption", 7), out)
+	// A different album id is independent.
+	m.handleMessage(ctx, albumMsg("other album", 9), out)
+
+	if len(out) != 2 {
+		t.Fatalf("album dedup emitted %d signals, want 2", len(out))
+	}
+	first := <-out
+	second := <-out
+	if first.Text != "real caption" || second.Text != "other album" {
+		t.Fatalf("unexpected signals: %q, %q", first.Text, second.Text)
+	}
+}
+
+func TestGroupedSeenCacheTTL(t *testing.T) {
+	c := newGroupedSeenCache(50*time.Millisecond, 8)
+	now := time.Now()
+
+	if c.checkAndRecord(1, now) {
+		t.Fatal("first record should return false")
+	}
+	if !c.checkAndRecord(1, now.Add(10*time.Millisecond)) {
+		t.Fatal("second record within TTL should return true")
+	}
+	if c.checkAndRecord(1, now.Add(100*time.Millisecond)) {
+		t.Fatal("record after TTL expiry should return false")
+	}
+}
+
+func TestGroupedSeenCacheBounded(t *testing.T) {
+	c := newGroupedSeenCache(time.Hour, 4)
+	now := time.Now()
+	for i := int64(0); i < 10; i++ {
+		c.checkAndRecord(i, now)
+	}
+	c.mu.Lock()
+	n := len(c.items)
+	c.mu.Unlock()
+	if n != 4 {
+		t.Fatalf("cache size = %d, want bounded at 4", n)
 	}
 }
