@@ -30,10 +30,29 @@ import (
 )
 
 const (
-	qualifierWorkers = 4
-	qualifierTimeout = 60 * time.Second
-	dedupTTL         = 72 * time.Hour
+	defaultQualifierWorkers = 3
+	maxQualifierWorkers     = 10
+	qualifierTimeout        = 60 * time.Second
+	dedupTTL                = 72 * time.Hour
 )
+
+// llmConcurrency resolves LLM_CONCURRENCY: unset/invalid/non-positive
+// falls back to the default, values above the ceiling are clamped so a
+// misconfigured env cannot flood the upstream gateway.
+func llmConcurrency() int {
+	raw := strings.TrimSpace(os.Getenv("LLM_CONCURRENCY"))
+	if raw == "" {
+		return defaultQualifierWorkers
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return defaultQualifierWorkers
+	}
+	if n > maxQualifierWorkers {
+		return maxQualifierWorkers
+	}
+	return n
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -120,7 +139,9 @@ func run() error {
 		return fmt.Errorf("LLM client: %w", err)
 	}
 	dedup := lane.NewDeduplicator(rdb, dedupTTL, log)
-	qualifier, err := lane.NewQualifier(llm, qualifierWorkers, qualifierTimeout, log, dedup)
+	workers := llmConcurrency()
+	log.Info("llm qualifier configured", "workers", workers, "timeout", qualifierTimeout)
+	qualifier, err := lane.NewQualifier(llm, workers, qualifierTimeout, log, dedup)
 	if err != nil {
 		return fmt.Errorf("qualifier: %w", err)
 	}
