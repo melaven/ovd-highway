@@ -200,6 +200,30 @@ export function putSettings(
   });
 }
 
+// ---- Dead Letter Queue ----
+
+export interface DLQItem {
+  id: string;
+  source: string;
+  error: string;
+  attempts: number;
+  created_at: string;
+  payload_preview: string;
+}
+
+export interface DLQList {
+  count: number;
+  items: DLQItem[];
+}
+
+export function listDLQ(): Promise<ApiResult<DLQList>> {
+  return apiFetch<DLQList>('/dlq');
+}
+
+export function retryDLQ(): Promise<ApiResult<{ queued: number }>> {
+  return apiFetch<{ queued: number }>('/dlq/retry', { method: 'POST' });
+}
+
 /** True when the failure means "endpoint not implemented / unreachable / 5xx". */
 export function isOfflineResult(result: { ok: boolean; status?: number }): boolean {
   if (result.ok) return false;
