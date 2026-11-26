@@ -79,7 +79,7 @@ func newChatClient(apiKey, baseURL, model string, headers map[string]string) (*O
 		endpoint += "/chat/completions"
 	}
 	return &OpenAICompatibleClient{
-		http:     &http.Client{Timeout: 15 * time.Second},
+		http:     &http.Client{Timeout: 60 * time.Second},
 		apiKey:   apiKey,
 		model:    model,
 		endpoint: endpoint,
