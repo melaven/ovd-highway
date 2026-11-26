@@ -326,9 +326,18 @@ func parseTargetChannels(raw string) []string {
 
 func normalizeTargetName(raw string) string {
 	name := strings.ToLower(SanitizeChannelInput(raw))
+	if i := strings.IndexAny(name, "?#"); i >= 0 {
+		name = name[:i]
+	}
 	name = strings.TrimPrefix(name, "https://")
 	name = strings.TrimPrefix(name, "http://")
-	name = strings.TrimPrefix(name, "t.me/")
+	name = strings.TrimPrefix(name, "www.")
+	for _, prefix := range []string{"t.me/s/", "telegram.me/s/", "t.me/", "telegram.me/"} {
+		if strings.HasPrefix(name, prefix) {
+			name = strings.TrimPrefix(name, prefix)
+			break
+		}
+	}
 	name = strings.TrimPrefix(name, "@")
 	return strings.TrimSuffix(name, "/")
 }
