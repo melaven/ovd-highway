@@ -1,12 +1,22 @@
 package controlplane
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
 
 	"ovd/internal/api"
+	"ovd/internal/pipeline/dlq"
 )
+
+// DLQAdmin exposes dead-letter queue inspection and manual retry to the
+// Control Plane. *dlq.PostgresRetryStore satisfies it.
+type DLQAdmin interface {
+	List(ctx context.Context, limit int) ([]dlq.DLQItem, error)
+	Count(ctx context.Context) (int, error)
+	RetryAll(ctx context.Context) (int64, error)
+}
 
 // Handler exposes the Control Plane REST contract under /api/v1/*.
 // It is intended to be mounted behind api.BearerAuth and api.CORS.
@@ -15,6 +25,7 @@ type Handler struct {
 	leads    LeadRepo
 	settings *SettingsStore
 	manager  *SourceManager
+	dlq      DLQAdmin
 	log      *slog.Logger
 }
 
@@ -31,6 +42,12 @@ func NewHandler(repo SourceRepo, leads LeadRepo, settings *SettingsStore, manage
 	}
 }
 
+// SetDLQAdmin wires the dead-letter queue store. When unset, the /dlq
+// endpoints answer 503.
+func (h *Handler) SetDLQAdmin(d DLQAdmin) {
+	h.dlq = d
+}
+
 // Routes returns a mux with the full /api/v1 route table.
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
@@ -41,6 +58,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/settings", h.getSettings)
 	mux.HandleFunc("PUT /api/v1/settings", h.putSettings)
 	mux.HandleFunc("PATCH /api/v1/leads/{id}", h.patchLead)
+	mux.HandleFunc("GET /api/v1/dlq", h.listDLQ)
+	mux.HandleFunc("POST /api/v1/dlq/retry", h.retryDLQ)
 	return mux
 }
 
@@ -141,6 +160,45 @@ func (h *Handler) patchLead(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, h.settings.Get())
+}
+
+func (h *Handler) listDLQ(w http.ResponseWriter, r *http.Request) {
+	if h.dlq == nil {
+		api.WriteError(w, http.StatusServiceUnavailable, "dlq store unavailable")
+		return
+	}
+	ctx := r.Context()
+	count, err := h.dlq.Count(ctx)
+	if err != nil {
+		h.log.Error("dlq count failed", "err", err)
+		api.WriteError(w, http.StatusInternalServerError, "failed to count dead letters")
+		return
+	}
+	items, err := h.dlq.List(ctx, 50)
+	if err != nil {
+		h.log.Error("dlq list failed", "err", err)
+		api.WriteError(w, http.StatusInternalServerError, "failed to list dead letters")
+		return
+	}
+	if items == nil {
+		items = []dlq.DLQItem{}
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]any{"count": count, "items": items})
+}
+
+func (h *Handler) retryDLQ(w http.ResponseWriter, r *http.Request) {
+	if h.dlq == nil {
+		api.WriteError(w, http.StatusServiceUnavailable, "dlq store unavailable")
+		return
+	}
+	n, err := h.dlq.RetryAll(r.Context())
+	if err != nil {
+		h.log.Error("dlq retry-all failed", "err", err)
+		api.WriteError(w, http.StatusInternalServerError, "failed to queue dead letter retries")
+		return
+	}
+	h.log.Info("dlq retry-all queued", "rows", n)
+	api.WriteJSON(w, http.StatusOK, map[string]any{"queued": n})
 }
 
 func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) {

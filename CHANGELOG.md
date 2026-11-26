@@ -9,9 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `LLM_CONCURRENCY` env var controls parallel LLM qualification workers (default `3`, clamped to `1..10`); the resolved value is logged at startup.
+- `GET /api/v1/dlq` lists dead-letter queue rows (`count` + latest 50 items with payload preview) and `POST /api/v1/dlq/retry` re-queues all unresolved rows for immediate reprocessing.
+- Dashboard bottom status bar shows a `DLQ: N` counter with a popover of recent failures and a "Retry all" action.
+- Telegram target normalization now accepts `www.t.me/`, `telegram.me/`, `www.telegram.me/`, `t.me/s/` preview URLs and query/trailing-slash variants.
+
 ### Changed
 
+- LLM HTTP client and qualifier context timeouts aligned to 60s so slow OpenAI-compatible models no longer get cut at 15s.
+
 ### Fixed
+
+- Media-only Telegram posts (empty text) are dropped before LLM qualification.
+- Album posts sharing `GroupedID` are deduplicated: only the first captioned frame becomes a signal, and empty leading frames no longer reserve the group ID.
 
 ## [1.0.0] — 2026-11-23
 

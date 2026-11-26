@@ -31,6 +31,8 @@ Optional but recommended for production:
 - `ADMIN_API_TOKEN` — **must** be set outside local dev; it protects `/api/v1/*` and the `/ws` upgrade.
 - `WS_ALLOWED_ORIGINS` — extra allowed WebSocket origins (localhost variants are always allowed).
 - `LLM_BASE_URL`, `LLM_MODEL` — point the qualifier at a self-hosted or alternative OpenAI-compatible endpoint.
+- `LLM_CONCURRENCY` — parallel LLM qualification workers (default `3`, clamped to `1..10`).
+- `/api/v1/dlq` (`GET`) and `/api/v1/dlq/retry` (`POST`) — inspect and manually re-queue dead-lettered signals; surfaced in the dashboard's bottom status bar.
 - `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER` — enable the Reddit connector.
 - `TG_TARGET_CHANNELS` — comma-separated Telegram channels to ingest.
 - `LOG_LEVEL=debug` — verbose structured logs while troubleshooting.

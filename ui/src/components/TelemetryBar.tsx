@@ -1,5 +1,6 @@
 import { Loader2, LockKeyhole, LockOpen, RefreshCw } from 'lucide-react';
 import type { ConnState } from '../App';
+import DLQBadge from './DLQBadge';
 
 interface TelemetryBarProps {
   conn: ConnState;
@@ -65,6 +66,10 @@ export default function TelemetryBar({
           {minScore === null ? '—' : minScore}
         </span>
       </span>
+
+      <span className="h-3 w-px bg-[var(--glass-border)]" />
+
+      <DLQBadge hasToken={hasToken} />
 
       <span className="h-3 w-px bg-[var(--glass-border)]" />
 

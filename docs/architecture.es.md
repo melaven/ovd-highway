@@ -11,7 +11,7 @@ OVD // Highway es un motor de ingesta multiprotocolo zero-blocking: los conector
  Reddit (OAuth2)    ─┼─> rawStream ─> dedup (Redis, TTL 72h) ─> dedupStream
  HeadHunter API     ─┘                                             │
  Mock source (dev)                                                ▼
-                                              qualifier (4 workers, timeout 45s)
+                                              qualifier (LLM_CONCURRENCY workers, timeout 60s)
                                               ├─ prefilter + LLM triage
                                               └─ en fallo ─> DLQ (dead_letter_signals)
                                                            │
@@ -43,7 +43,7 @@ Los conectores se crean por cada fila habilitada de la tabla `sources` mediante 
 
 - **Deduplicator** — basado en Redis, TTL 72 h, clave por contenido de la señal.
 - **Prefilter** — filtro heurístico barato antes de la llamada al LLM.
-- **Qualifier** — 4 workers, timeout de 45 s por señal. Aplica `system_prompt` y `min_score` de `engine_settings` (recarga en caliente vía `GET/PUT /api/v1/settings`). Usa OpenRouter por defecto o cualquier endpoint compatible con OpenAI mediante `LLM_BASE_URL`/`LLM_MODEL`.
+- **Qualifier** — `LLM_CONCURRENCY` workers (por defecto 3, rango 1–10), timeout de 60 s por señal (cliente HTTP y contexto alineados). Aplica `system_prompt` y `min_score` de `engine_settings` (recarga en caliente vía `GET/PUT /api/v1/settings`). Usa OpenRouter por defecto o cualquier endpoint compatible con OpenAI mediante `LLM_BASE_URL`/`LLM_MODEL`.
 - **Failure handler** — las señales que fallan en la evaluación LLM (HTTP 429/5xx) se archivan en `dead_letter_signals` y sus claves de dedup se liberan para reintento.
 
 ### Dispatcher (`cmd/engine/main.go`)

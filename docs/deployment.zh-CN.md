@@ -31,6 +31,8 @@ cp .env.example .env
 - `ADMIN_API_TOKEN` — 本地开发之外**必须**设置；用于保护 `/api/v1/*` 和 `/ws` 升级握手。
 - `WS_ALLOWED_ORIGINS` — 额外允许的 WebSocket 来源（localhost 变体始终允许）。
 - `LLM_BASE_URL`、`LLM_MODEL` — 将资质评估指向自建或其他 OpenAI 兼容端点。
+- `LLM_CONCURRENCY` — 并行 LLM 资质评估 worker 数（默认 `3`，范围 `1..10`）。
+- `/api/v1/dlq`（`GET`）与 `/api/v1/dlq/retry`（`POST`）— 查看并手动重试死信队列中的信号；已显示在仪表盘底部状态栏。
 - `REDDIT_CLIENT_ID`、`REDDIT_CLIENT_SECRET`、`REDDIT_USER` — 启用 Reddit 连接器。
 - `TG_TARGET_CHANNELS` — 逗号分隔的 Telegram 频道列表。
 - `LOG_LEVEL=debug` — 排障时输出详细结构化日志。

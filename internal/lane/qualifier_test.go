@@ -3,8 +3,10 @@ package lane
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -120,5 +122,65 @@ func TestIsRetryableIncludesTimeoutAndEOF(t *testing.T) {
 	}
 	if isRetryable(errors.New("permanent failure")) {
 		t.Error("isRetryable(permanent failure) = true, want false")
+	}
+}
+
+type slowJSONCompleter struct {
+	current atomic.Int32
+	maxSeen atomic.Int32
+	calls   atomic.Int32
+}
+
+func (c *slowJSONCompleter) Complete(ctx context.Context, _, _ string) (string, error) {
+	cur := c.current.Add(1)
+	for {
+		old := c.maxSeen.Load()
+		if cur <= old || c.maxSeen.CompareAndSwap(old, cur) {
+			break
+		}
+	}
+	defer c.current.Add(-1)
+	c.calls.Add(1)
+	select {
+	case <-time.After(20 * time.Millisecond):
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	return `{"is_relevant":true,"score":8,"estimated_budget":"100","pain_points":"p","draft_proposal":"d","tech_stack":[],"detected_job_type":"freelance"}`, nil
+}
+
+func TestQualifierPoolProcessesBatchConcurrently(t *testing.T) {
+	completer := &slowJSONCompleter{}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	q, err := NewQualifier(completer, 3, 5*time.Second, log)
+	if err != nil {
+		t.Fatalf("NewQualifier: %v", err)
+	}
+
+	const n = 9
+	in := make(chan domain.RawSignal, n)
+	for i := 0; i < n; i++ {
+		in <- domain.RawSignal{ID: fmt.Sprintf("s%d", i), Source: "test", Text: passingPrefilterText, JobType: "freelance"}
+	}
+	close(in)
+
+	out := make(chan domain.QualifiedLead, n)
+	if err := q.Run(context.Background(), in, out); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	close(out)
+
+	got := 0
+	for range out {
+		got++
+	}
+	if got != n {
+		t.Fatalf("leads = %d, want %d", got, n)
+	}
+	if calls := completer.calls.Load(); calls != n {
+		t.Fatalf("LLM calls = %d, want %d", calls, n)
+	}
+	if max := completer.maxSeen.Load(); max < 2 || max > 3 {
+		t.Fatalf("max in-flight = %d, want within (1, 3]", max)
 	}
 }

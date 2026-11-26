@@ -11,7 +11,7 @@ OVD // Highway — это zero-blocking движок мультипротоко�
  Reddit (OAuth2)    ─┼─> rawStream ─> dedup (Redis, TTL 72ч) ─> dedupStream
  HeadHunter API     ─┘                                             │
  Mock source (dev)                                                ▼
-                                              qualifier (4 воркера, таймаут 45с)
+                                              qualifier (LLM_CONCURRENCY воркеров, таймаут 60с)
                                               ├─ prefilter + LLM triage
                                               └─ при ошибке ─> DLQ (dead_letter_signals)
                                                            │
@@ -43,7 +43,7 @@ OVD // Highway — это zero-blocking движок мультипротоко�
 
 - **Deduplicator** — на Redis, TTL 72 часа, ключ по содержимому сигнала.
 - **Prefilter** — дешёвый эвристический фильтр перед вызовом LLM.
-- **Qualifier** — 4 воркера, таймаут 45 с на сигнал. Применяет `system_prompt` и `min_score` из `engine_settings` (горячая перезагрузка через `GET/PUT /api/v1/settings`). По умолчанию OpenRouter либо любой OpenAI-совместимый endpoint через `LLM_BASE_URL`/`LLM_MODEL`.
+- **Qualifier** — `LLM_CONCURRENCY` воркеров (по умолчанию 3, диапазон 1–10), таймаут 60 с на сигнал (HTTP-клиент и контекст выровнены). Применяет `system_prompt` и `min_score` из `engine_settings` (горячая перезагрузка через `GET/PUT /api/v1/settings`). По умолчанию OpenRouter либо любой OpenAI-совместимый endpoint через `LLM_BASE_URL`/`LLM_MODEL`.
 - **Failure handler** — сигналы, упавшие на оценке LLM (HTTP 429/5xx), архивируются в `dead_letter_signals`, их dedup-ключи освобождаются для retry.
 
 ### Dispatcher (`cmd/engine/main.go`)

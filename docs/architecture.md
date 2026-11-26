@@ -11,7 +11,7 @@ OVD // Highway is a zero-blocking, multi-protocol ingestion engine: onramp conne
  Reddit (OAuth2)    ─┼─> rawStream ─> dedup (Redis, 72h TTL) ─> dedupStream
  HeadHunter API     ─┘                                             │
  Mock source (dev)                                                ▼
-                                              qualifier (4 workers, 45s timeout)
+                                              qualifier (LLM_CONCURRENCY workers, 60s timeout)
                                               ├─ prefilter + LLM triage
                                               └─ on failure ─> DLQ (dead_letter_signals)
                                                            │
@@ -43,7 +43,7 @@ Connectors are spawned per enabled row in the `sources` table by `controlplane.S
 
 - **Deduplicator** — Redis-backed, 72h TTL, keyed by signal content.
 - **Prefilter** — cheap heuristic gate before the LLM call.
-- **Qualifier** — 4 workers, 45s per-signal timeout. Applies `system_prompt` + `min_score` from `engine_settings` (hot-reloaded via `GET/PUT /api/v1/settings`). Uses OpenRouter by default or any OpenAI-compatible endpoint via `LLM_BASE_URL`/`LLM_MODEL`.
+- **Qualifier** — `LLM_CONCURRENCY` workers (default 3, clamped 1–10), 60s per-signal timeout (HTTP client and context aligned). Applies `system_prompt` + `min_score` from `engine_settings` (hot-reloaded via `GET/PUT /api/v1/settings`). Uses OpenRouter by default or any OpenAI-compatible endpoint via `LLM_BASE_URL`/`LLM_MODEL`.
 - **Failure handler** — signals that fail LLM evaluation (HTTP 429/5xx) are archived to `dead_letter_signals` and their dedup keys released for retry.
 
 ### Dispatcher (`cmd/engine/main.go`)
