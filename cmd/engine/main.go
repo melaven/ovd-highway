@@ -31,7 +31,7 @@ import (
 
 const (
 	qualifierWorkers = 4
-	qualifierTimeout = 45 * time.Second
+	qualifierTimeout = 60 * time.Second
 	dedupTTL         = 72 * time.Hour
 )
 
