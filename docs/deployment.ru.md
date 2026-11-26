@@ -31,6 +31,8 @@ cp .env.example .env
 - `ADMIN_API_TOKEN` — **обязательно** вне локальной разработки; защищает `/api/v1/*` и upgrade `/ws`.
 - `WS_ALLOWED_ORIGINS` — дополнительные разрешённые origin для WebSocket (localhost-варианты разрешены всегда).
 - `LLM_BASE_URL`, `LLM_MODEL` — направить квалификатор на self-hosted или альтернативный OpenAI-совместимый endpoint.
+- `LLM_CONCURRENCY` — число параллельных LLM-воркеров квалификации (по умолчанию `3`, диапазон `1..10`).
+- `/api/v1/dlq` (`GET`) и `/api/v1/dlq/retry` (`POST`) — просмотр и ручной перезапуск сигналов из dead-letter queue; выведены в нижней статус-строке дашборда.
 - `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER` — включить Reddit-коннектор.
 - `TG_TARGET_CHANNELS` — список Telegram-каналов через запятую.
 - `LOG_LEVEL=debug` — подробные структурированные логи при диагностике.

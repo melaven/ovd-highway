@@ -11,7 +11,7 @@ OVD // Highway 是一个零阻塞的多协议采集引擎：各接入连接器�
  Reddit (OAuth2)    ─┼─> rawStream ─> dedup (Redis, TTL 72h) ─> dedupStream
  HeadHunter API     ─┘                                             │
  Mock source (dev)                                                ▼
-                                              qualifier (4 workers, 45s 超时)
+                                              qualifier (LLM_CONCURRENCY 个 worker,60s 超时)
                                               ├─ prefilter + LLM triage
                                               └─ 失败时 ─> DLQ (dead_letter_signals)
                                                            │
@@ -43,7 +43,7 @@ OVD // Highway 是一个零阻塞的多协议采集引擎：各接入连接器�
 
 - **Deduplicator** — 基于 Redis，TTL 72 小时，按信号内容生成键。
 - **Prefilter** — 在调用 LLM 之前的廉价启发式过滤。
-- **Qualifier** — 4 个 worker，每条信号 45 秒超时。应用 `engine_settings` 中的 `system_prompt` 和 `min_score`（通过 `GET/PUT /api/v1/settings` 热更新）。默认使用 OpenRouter，也可通过 `LLM_BASE_URL`/`LLM_MODEL` 指向任意 OpenAI 兼容端点。
+- **Qualifier** — `LLM_CONCURRENCY` 个 worker（默认 3，范围 1–10），每条信号 60 秒超时（HTTP 客户端与上下文已对齐）。应用 `engine_settings` 中的 `system_prompt` 和 `min_score`（通过 `GET/PUT /api/v1/settings` 热更新）。默认使用 OpenRouter，也可通过 `LLM_BASE_URL`/`LLM_MODEL` 指向任意 OpenAI 兼容端点。
 - **Failure handler** — LLM 评估失败（HTTP 429/5xx）的信号会被归档到 `dead_letter_signals`，其去重键被释放以便重试。
 
 ### Dispatcher（`cmd/engine/main.go`）
