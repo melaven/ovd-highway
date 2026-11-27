@@ -98,3 +98,30 @@ docker compose up -d --build      # after config/code change
 ```
 
 Boot is idempotent: schema DDL uses `IF NOT EXISTS`, sources/settings hydrate from Postgres, and the MTProto session resumes from `session.json`.
+
+## v1.0.0 release smoke & soak checklist
+
+Run before tagging `v1.0.0`. Requires a running engine (`docker compose up -d`) and `ADMIN_API_TOKEN`.
+
+### Smoke (~5 min)
+
+| Check | Command / step | Pass criterion |
+|---|---|---|
+| Liveness | `curl -s localhost:8080/healthz` | `200` `{"status":"ok"}` |
+| Readiness | `curl -s localhost:8080/readyz` | `200`; `checks.postgres` and `checks.redis` are `"ok"` |
+| Metrics | `curl -s localhost:8080/metrics` | exposes `ovd_uptime_seconds`, `ovd_dlq_*`, `ovd_tg_*_dropped_total` |
+| API auth | `curl -s -o /dev/null -w '%{http_code}' localhost:8080/api/v1/sources` | `401` without token; `200` with `Authorization: Bearer $ADMIN_API_TOKEN` |
+| DLQ API | `curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" 'localhost:8080/api/v1/dlq?limit=5'` | `200` JSON with `count` and `items` |
+| UI | open `http://localhost:8080` | dashboard loads; DLQ badge visible in the bottom status bar |
+
+### Live Telegram soak (30–60 min)
+
+1. Ensure one `tg` source row is enabled (`enabled = true`) pointing at a real channel.
+2. Wait for (or post) several messages, including an album and a media-only post.
+3. On `/metrics`, `ovd_tg_empty_media_dropped_total` and `ovd_tg_album_duplicates_dropped_total` should increment on drops.
+4. `ovd_leads_dispatched_total` should grow when the LLM responds; `GET /api/v1/dlq` should show `count: 0` or a draining queue (`ovd_dlq_resolved_total` rising).
+
+### Pass / fail
+
+- **Pass**: all smoke checks green; soak yields leads or clean drops; `ovd_dlq_store_errors_total` flat; `ovd_goroutines` stable after soak.
+- **Do not tag on**: any 5xx on probes, DLQ growing with no `next_retry_at` progress, qualifier errors persisting >5 min, or the UI failing to load.

@@ -98,3 +98,30 @@ docker compose up -d --build      # tras cambiar config/código
 ```
 
 El arranque es idempotente: el DDL del esquema usa `IF NOT EXISTS`, fuentes/ajustes se hidratan desde Postgres y la sesión MTProto se reanuda desde `session.json`.
+
+## Checklist de smoke y soak para el release v1.0.0
+
+Ejecutar antes de etiquetar `v1.0.0`. Requiere el engine en marcha (`docker compose up -d`) y `ADMIN_API_TOKEN`.
+
+### Smoke (~5 min)
+
+| Comprobación | Comando / paso | Criterio de pase |
+|---|---|---|
+| Liveness | `curl -s localhost:8080/healthz` | `200` `{"status":"ok"}` |
+| Readiness | `curl -s localhost:8080/readyz` | `200`; `checks.postgres` y `checks.redis` en `"ok"` |
+| Métricas | `curl -s localhost:8080/metrics` | expone `ovd_uptime_seconds`, `ovd_dlq_*`, `ovd_tg_*_dropped_total` |
+| Auth API | `curl -s -o /dev/null -w '%{http_code}' localhost:8080/api/v1/sources` | `401` sin token; `200` con `Authorization: Bearer $ADMIN_API_TOKEN` |
+| DLQ API | `curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" 'localhost:8080/api/v1/dlq?limit=5'` | `200` JSON con `count` e `items` |
+| UI | abrir `http://localhost:8080` | el dashboard carga; badge DLQ visible en la barra de estado inferior |
+
+### Soak en vivo de Telegram (30–60 min)
+
+1. Verifica que haya una fila `sources` de tipo `tg` habilitada (`enabled = true`) apuntando a un canal real.
+2. Espera (o publica) varios mensajes, incluido un álbum y una publicación solo con media.
+3. En `/metrics`, `ovd_tg_empty_media_dropped_total` y `ovd_tg_album_duplicates_dropped_total` deben incrementarse con los descartes.
+4. `ovd_leads_dispatched_total` debe crecer cuando el LLM responde; `GET /api/v1/dlq` debe mostrar `count: 0` o una cola que drena (`ovd_dlq_resolved_total` sube).
+
+### Pass / fail
+
+- **Pass**: todas las comprobaciones smoke en verde; el soak produce leads o descartes limpios; `ovd_dlq_store_errors_total` plano; `ovd_goroutines` estable tras el soak.
+- **No etiquetar si**: cualquier 5xx en las sondas, DLQ creciendo sin progreso de `next_retry_at`, errores del qualifier >5 min, o la UI no carga.

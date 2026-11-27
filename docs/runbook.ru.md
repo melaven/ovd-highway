@@ -98,3 +98,30 @@ docker compose up -d --build      # после смены конфига/код�
 ```
 
 Запуск идемпотентен: DDL схемы использует `IF NOT EXISTS`, источники/настройки гидрируются из Postgres, а MTProto-сессия продолжается из `session.json`.
+
+## Чек-лист smoke и soak для релиза v1.0.0
+
+Выполняется перед тегом `v1.0.0`. Требуется запущенный engine (`docker compose up -d`) и `ADMIN_API_TOKEN`.
+
+### Smoke (~5 мин)
+
+| Проверка | Команда / шаг | Критерий |
+|---|---|---|
+| Liveness | `curl -s localhost:8080/healthz` | `200` `{"status":"ok"}` |
+| Readiness | `curl -s localhost:8080/readyz` | `200`; `checks.postgres` и `checks.redis` = `"ok"` |
+| Метрики | `curl -s localhost:8080/metrics` | есть `ovd_uptime_seconds`, `ovd_dlq_*`, `ovd_tg_*_dropped_total` |
+| Авторизация API | `curl -s -o /dev/null -w '%{http_code}' localhost:8080/api/v1/sources` | `401` без токена; `200` с `Authorization: Bearer $ADMIN_API_TOKEN` |
+| DLQ API | `curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" 'localhost:8080/api/v1/dlq?limit=5'` | `200` JSON с `count` и `items` |
+| UI | открыть `http://localhost:8080` | дашборд загружается; бейдж DLQ виден в нижнем статус-баре |
+
+### Живой soak Telegram (30–60 мин)
+
+1. Убедитесь, что одна строка `sources` типа `tg` включена (`enabled = true`) и указывает на реальный канал.
+2. Дождитесь (или опубликуйте) нескольких сообщений, включая альбом и пост только с медиа.
+3. На `/metrics` счётчики `ovd_tg_empty_media_dropped_total` и `ovd_tg_album_duplicates_dropped_total` должны расти при отброшенных постах.
+4. `ovd_leads_dispatched_total` должен расти при ответах LLM; `GET /api/v1/dlq` — `count: 0` или очередь рассасывается (`ovd_dlq_resolved_total` растёт).
+
+### Критерии pass / fail
+
+- **Pass**: все smoke-проверки зелёные; soak даёт лиды или чистые отбросы; `ovd_dlq_store_errors_total` не растёт; `ovd_goroutines` стабилен после soak.
+- **Не тегировать при**: любых 5xx на пробах, росте DLQ без прогресса `next_retry_at`, ошибках qualifier дольше 5 минут или незагружающемся UI.
