@@ -11,6 +11,21 @@ import (
 // — never credentials — but it can be long, so it is truncated.
 const dlqPreviewLen = 240
 
+// dlqMaxListLimit caps the row count List will ever return, regardless of
+// the caller-supplied limit.
+const dlqMaxListLimit = 100
+
+// dlqListLimit normalizes a caller-supplied limit into [1, dlqMaxListLimit].
+func dlqListLimit(limit int) int {
+	if limit <= 0 {
+		return 50
+	}
+	if limit > dlqMaxListLimit {
+		return dlqMaxListLimit
+	}
+	return limit
+}
+
 // DLQItem is one dead-letter row exposed to the Control Plane API.
 type DLQItem struct {
 	ID             string    `json:"id"`
@@ -21,19 +36,26 @@ type DLQItem struct {
 	PayloadPreview string    `json:"payload_preview"`
 }
 
+// listDLQQuery reads the newest dead-letter rows. The schema marks every
+// selected column NOT NULL, but COALESCE guards rows.Scan against legacy
+// or manually edited rows so a NULL can never fail the whole listing.
 const listDLQQuery = `
-SELECT id::text, source, error_reason, retry_count, created_at,
-       left(raw_payload::text, $2)
+SELECT id::text,
+       COALESCE(source, ''),
+       COALESCE(error_reason, ''),
+       COALESCE(retry_count, 0),
+       created_at,
+       COALESCE(left(raw_payload::text, $2), '')
 FROM dead_letter_signals
 ORDER BY created_at DESC
 LIMIT $1
 `
 
 // List returns up to limit most recent dead-letter rows, newest first.
+// limit is clamped to [1, dlqMaxListLimit]; non-positive values fall back
+// to 50.
 func (s *PostgresRetryStore) List(ctx context.Context, limit int) ([]DLQItem, error) {
-	if limit <= 0 {
-		limit = 50
-	}
+	limit = dlqListLimit(limit)
 	rows, err := s.db.QueryContext(ctx, listDLQQuery, limit, dlqPreviewLen)
 	if err != nil {
 		return nil, fmt.Errorf("list dead letters: %w", err)
@@ -75,7 +97,9 @@ SET retry_count = 0, next_retry_at = NOW()
 // get another attempt, and next_retry_at is pulled to now so the worker
 // picks them up on its next poll. Returns the number of rows queued.
 // The operation is idempotent — it only mutates existing rows, it never
-// inserts duplicates.
+// inserts duplicates. No WHERE clause is needed: the schema has no status
+// column and successfully retried rows are DELETEd by Resolve, so every
+// row in the table is unresolved by definition.
 func (s *PostgresRetryStore) RetryAll(ctx context.Context) (int64, error) {
 	res, err := s.db.ExecContext(ctx, retryAllDLQQuery)
 	if err != nil {
