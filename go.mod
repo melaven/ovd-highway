@@ -3,7 +3,7 @@ module ovd
 go 1.27.4
 
 require (
-	github.com/go-telegram/bot v1.28.0
+	github.com/go-telegram/bot v1.30.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/gotd/td v0.166.1
