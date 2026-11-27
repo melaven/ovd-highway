@@ -2,9 +2,13 @@
 .github
 .env
 session.json
+*.session*
 *.exe
+*.diff
+diff.txt
 bin/
 coverage.out
+ovd-engine*
 
 node_modules
 ui/node_modules

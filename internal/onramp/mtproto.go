@@ -22,6 +22,7 @@ import (
 	tg "github.com/gotd/td/tg"
 
 	"ovd/internal/domain"
+	"ovd/internal/metrics"
 	"ovd/internal/pkg/breaker"
 )
 
@@ -254,12 +255,14 @@ func (m *MTProtoSource) handleMessage(ctx context.Context, msg tg.MessageClass, 
 
 	text := message.GetMessage()
 	if strings.TrimSpace(text) == "" {
+		metrics.IncTGEmptyMediaDrop()
 		return
 	}
 
 	// Album frames share GroupedID; only the first captioned frame is
 	// emitted. Empty frames return above, so they never reserve the ID.
 	if gid, ok := message.GetGroupedID(); ok && gid != 0 && m.grouped.checkAndRecord(gid, time.Now()) {
+		metrics.IncTGAlbumDupDrop()
 		m.log.Debug("album duplicate dropped", "grouped_id", gid)
 		return
 	}

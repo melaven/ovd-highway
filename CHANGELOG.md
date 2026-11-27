@@ -9,10 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `LLM_CONCURRENCY` env var controls parallel LLM qualification workers (default `3`, clamped to `1..10`); the resolved value is logged at startup.
-- `GET /api/v1/dlq` lists dead-letter queue rows (`count` + latest 50 items with payload preview) and `POST /api/v1/dlq/retry` re-queues all unresolved rows for immediate reprocessing.
+- `LLM_CONCURRENCY` env var controls parallel LLM qualification workers (default `3`, clamped to `1..10`); the resolved value is logged at startup and can be set in `docker-compose.yml` (`${LLM_CONCURRENCY:-3}`).
+- `GET /api/v1/dlq` lists dead-letter queue rows (`count` + latest items with payload preview) and accepts an optional `?limit=N` parameter (default `50`, clamped to `1..100`); `POST /api/v1/dlq/retry` re-queues all unresolved rows for immediate reprocessing.
 - Dashboard bottom status bar shows a `DLQ: N` counter with a popover of recent failures and a "Retry all" action.
 - Telegram target normalization now accepts `www.t.me/`, `telegram.me/`, `www.telegram.me/`, `t.me/s/` preview URLs and query/trailing-slash variants.
+- Prometheus counters `ovd_tg_empty_media_dropped_total` and `ovd_tg_album_duplicates_dropped_total` track Telegram posts dropped before qualification.
+- Engine container healthcheck on `/healthz` in `docker-compose.yml`.
+- v1.0.0 release smoke-check and soak-test runbook in `docs/runbook*.md`.
 
 ### Changed
 
@@ -20,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- DLQ admin SQL hardened: `List` clamps `limit` to `1..100`, selected columns are `COALESCE`-guarded against NULLs, and empty result sets serialize as `[]`.
+- `DLQBadge` polling lifecycle cleaned up (no synchronous `setState` in effects, interval/timeout cleanup on unmount, retry button guarded against double-clicks, API errors surfaced in the popover).
 - Media-only Telegram posts (empty text) are dropped before LLM qualification.
 - Album posts sharing `GroupedID` are deduplicated: only the first captioned frame becomes a signal, and empty leading frames no longer reserve the group ID.
 

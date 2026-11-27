@@ -184,3 +184,52 @@ func TestQualifierPoolProcessesBatchConcurrently(t *testing.T) {
 		t.Fatalf("max in-flight = %d, want within (1, 3]", max)
 	}
 }
+
+type stalledCompleter struct {
+	started chan struct{}
+}
+
+func (c *stalledCompleter) Complete(ctx context.Context, _, _ string) (string, error) {
+	select {
+	case c.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+func TestQualifierStopsOnContextCancel(t *testing.T) {
+	completer := &stalledCompleter{started: make(chan struct{}, 4)}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	q, err := NewQualifier(completer, 2, time.Hour, log)
+	if err != nil {
+		t.Fatalf("NewQualifier: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	in := make(chan domain.RawSignal)
+	out := make(chan domain.QualifiedLead)
+	done := make(chan error, 1)
+	go func() { done <- q.Run(ctx, in, out) }()
+
+	// Feed signals but keep `in` open: workers must exit via ctx.Done,
+	// not via channel close.
+	for i := 0; i < 2; i++ {
+		in <- domain.RawSignal{ID: fmt.Sprintf("stall%d", i), Source: "test", Text: passingPrefilterText, JobType: "freelance"}
+	}
+	select {
+	case <-completer.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("LLM completer was not invoked")
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run returned %v, want clean shutdown on cancel", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return promptly after context cancel")
+	}
+}

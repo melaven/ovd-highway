@@ -18,6 +18,9 @@ type Registry struct {
 	dlqRetriesScheduled atomic.Uint64
 	dlqResolved         atomic.Uint64
 	dlqStoreErrors      atomic.Uint64
+
+	tgEmptyMediaDropped  atomic.Uint64
+	tgAlbumDupDropped    atomic.Uint64
 }
 
 func NewRegistry() *Registry {
@@ -39,6 +42,8 @@ func (r *Registry) IncDispatchError()     { r.dispatchErrors.Add(1) }
 func (r *Registry) IncDLQRetryScheduled() { r.dlqRetriesScheduled.Add(1) }
 func (r *Registry) IncDLQResolved()       { r.dlqResolved.Add(1) }
 func (r *Registry) IncDLQStoreError()     { r.dlqStoreErrors.Add(1) }
+func (r *Registry) IncTGEmptyMediaDrop()  { r.tgEmptyMediaDropped.Add(1) }
+func (r *Registry) IncTGAlbumDupDrop()    { r.tgAlbumDupDropped.Add(1) }
 
 func IncLeadDispatched()    { defaultRegistry.IncLeadDispatched() }
 func IncLeadSaved()         { defaultRegistry.IncLeadSaved() }
@@ -47,6 +52,8 @@ func IncDispatchError()     { defaultRegistry.IncDispatchError() }
 func IncDLQRetryScheduled() { defaultRegistry.IncDLQRetryScheduled() }
 func IncDLQResolved()       { defaultRegistry.IncDLQResolved() }
 func IncDLQStoreError()     { defaultRegistry.IncDLQStoreError() }
+func IncTGEmptyMediaDrop()  { defaultRegistry.IncTGEmptyMediaDrop() }
+func IncTGAlbumDupDrop()    { defaultRegistry.IncTGAlbumDupDrop() }
 
 func (r *Registry) WritePrometheus(w io.Writer) error {
 	var ms runtime.MemStats
@@ -93,7 +100,13 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 			"ovd_dlq_resolved_total %d\n"+
 			"# HELP ovd_dlq_store_errors_total Internal DLQ persistence errors.\n"+
 			"# TYPE ovd_dlq_store_errors_total counter\n"+
-			"ovd_dlq_store_errors_total %d\n",
+			"ovd_dlq_store_errors_total %d\n"+
+			"# HELP ovd_tg_empty_media_dropped_total Telegram posts dropped for having no text (media-only).\n"+
+			"# TYPE ovd_tg_empty_media_dropped_total counter\n"+
+			"ovd_tg_empty_media_dropped_total %d\n"+
+			"# HELP ovd_tg_album_duplicates_dropped_total Telegram album frames dropped as GroupedID duplicates.\n"+
+			"# TYPE ovd_tg_album_duplicates_dropped_total counter\n"+
+			"ovd_tg_album_duplicates_dropped_total %d\n",
 		uptime,
 		runtime.NumGoroutine(),
 		ms.Alloc,
@@ -106,6 +119,8 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 		r.dlqRetriesScheduled.Load(),
 		r.dlqResolved.Load(),
 		r.dlqStoreErrors.Load(),
+		r.tgEmptyMediaDropped.Load(),
+		r.tgAlbumDupDropped.Load(),
 	)
 	return err
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"ovd/internal/api"
 	"ovd/internal/pipeline/dlq"
@@ -174,7 +175,7 @@ func (h *Handler) listDLQ(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusInternalServerError, "failed to count dead letters")
 		return
 	}
-	items, err := h.dlq.List(ctx, 50)
+	items, err := h.dlq.List(ctx, dlqListLimitParam(r))
 	if err != nil {
 		h.log.Error("dlq list failed", "err", err)
 		api.WriteError(w, http.StatusInternalServerError, "failed to list dead letters")
@@ -184,6 +185,24 @@ func (h *Handler) listDLQ(w http.ResponseWriter, r *http.Request) {
 		items = []dlq.DLQItem{}
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{"count": count, "items": items})
+}
+
+// dlqListLimitParam reads the optional ?limit=N query parameter. Missing,
+// invalid, or non-positive values fall back to 50; values above 100 are
+// clamped to 100.
+func dlqListLimitParam(r *http.Request) int {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return 50
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 50
+	}
+	if n > 100 {
+		return 100
+	}
+	return n
 }
 
 func (h *Handler) retryDLQ(w http.ResponseWriter, r *http.Request) {

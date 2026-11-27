@@ -98,3 +98,30 @@ docker compose up -d --build      # 配置/代码变更后使用
 ```
 
 启动是幂等的：schema DDL 使用 `IF NOT EXISTS`，信号源/设置从 Postgres 水合，MTProto 会话从 `session.json` 恢复。
+
+## v1.0.0 发布 smoke 与 soak 检查清单
+
+在打 `v1.0.0` 标签前执行。需要运行中的 engine（`docker compose up -d`）和 `ADMIN_API_TOKEN`。
+
+### Smoke（约 5 分钟）
+
+| 检查 | 命令 / 步骤 | 通过标准 |
+|---|---|---|
+| Liveness | `curl -s localhost:8080/healthz` | `200` `{"status":"ok"}` |
+| Readiness | `curl -s localhost:8080/readyz` | `200`；`checks.postgres` 与 `checks.redis` 为 `"ok"` |
+| 指标 | `curl -s localhost:8080/metrics` | 暴露 `ovd_uptime_seconds`、`ovd_dlq_*`、`ovd_tg_*_dropped_total` |
+| API 鉴权 | `curl -s -o /dev/null -w '%{http_code}' localhost:8080/api/v1/sources` | 无 token 返回 `401`；带 `Authorization: Bearer $ADMIN_API_TOKEN` 返回 `200` |
+| DLQ API | `curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" 'localhost:8080/api/v1/dlq?limit=5'` | `200` JSON，含 `count` 与 `items` |
+| UI | 打开 `http://localhost:8080` | 仪表盘正常加载；底部状态栏可见 DLQ 徽标 |
+
+### Telegram 实时 soak（30–60 分钟）
+
+1. 确认 `sources` 表中有一条启用的 `tg` 类型记录（`enabled = true`），指向真实频道。
+2. 等待（或发布）多条消息，包括一个相册和一条仅含媒体的帖子。
+3. 在 `/metrics` 上，`ovd_tg_empty_media_dropped_total` 与 `ovd_tg_album_duplicates_dropped_total` 在丢弃时应递增。
+4. LLM 正常响应时 `ovd_leads_dispatched_total` 应增长；`GET /api/v1/dlq` 应显示 `count: 0` 或队列正在排空（`ovd_dlq_resolved_total` 上升）。
+
+### Pass / fail
+
+- **Pass**：所有 smoke 检查通过；soak 产生线索或干净丢弃；`ovd_dlq_store_errors_total` 不增长；soak 后 `ovd_goroutines` 保持稳定。
+- **出现以下情况不要打标签**：探针出现任何 5xx、DLQ 增长且 `next_retry_at` 无进展、qualifier 错误持续超过 5 分钟、或 UI 无法加载。

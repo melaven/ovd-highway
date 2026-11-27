@@ -1,15 +1,20 @@
 package onramp
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gotd/td/tg"
 
 	"ovd/internal/domain"
+	"ovd/internal/metrics"
 )
 
 func TestSanitizeChannelInput(t *testing.T) {
@@ -163,5 +168,104 @@ func TestGroupedSeenCacheBounded(t *testing.T) {
 	c.mu.Unlock()
 	if n != 4 {
 		t.Fatalf("cache size = %d, want bounded at 4", n)
+	}
+}
+
+func prometheusCounter(t *testing.T, name string) uint64 {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := metrics.Default().WritePrometheus(&buf); err != nil {
+		t.Fatalf("WritePrometheus: %v", err)
+	}
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if strings.HasPrefix(line, name+" ") {
+			var n uint64
+			if _, err := fmt.Sscanf(line, name+" %d", &n); err == nil {
+				return n
+			}
+		}
+	}
+	t.Fatalf("counter %s not found in exposition", name)
+	return 0
+}
+
+func TestHandleMessageDropMetrics(t *testing.T) {
+	m := newTestMTProtoSource(t)
+	out := make(chan domain.RawSignal, 4)
+	ctx := context.Background()
+
+	emptyBefore := prometheusCounter(t, "ovd_tg_empty_media_dropped_total")
+	dupBefore := prometheusCounter(t, "ovd_tg_album_duplicates_dropped_total")
+
+	m.handleMessage(ctx, albumMsg("", 0), out)
+	m.handleMessage(ctx, albumMsg("first caption", 42), out)
+	m.handleMessage(ctx, albumMsg("duplicate frame", 42), out)
+
+	if got := prometheusCounter(t, "ovd_tg_empty_media_dropped_total"); got != emptyBefore+1 {
+		t.Fatalf("empty media counter = %d, want %d", got, emptyBefore+1)
+	}
+	if got := prometheusCounter(t, "ovd_tg_album_duplicates_dropped_total"); got != dupBefore+1 {
+		t.Fatalf("album dup counter = %d, want %d", got, dupBefore+1)
+	}
+}
+
+func TestGroupedSeenCacheConcurrent(t *testing.T) {
+	const (
+		goroutines   = 8
+		overlapGids  = 10
+		uniquePerGid = 20
+	)
+	c := newGroupedSeenCache(time.Hour, 4096)
+
+	type result struct {
+		gid int64
+		seen bool
+	}
+	results := make(chan result, goroutines*(overlapGids+uniquePerGid))
+	now := time.Now()
+
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < overlapGids; i++ {
+				gid := int64(i)
+				results <- result{gid, c.checkAndRecord(gid, now)}
+			}
+			for i := 0; i < uniquePerGid; i++ {
+				gid := int64(10000 + g*uniquePerGid + i)
+				results <- result{gid, c.checkAndRecord(gid, now)}
+			}
+		}(g)
+	}
+	wg.Wait()
+	close(results)
+
+	firstSeen := make(map[int64]int)
+	for r := range results {
+		if r.gid < 10000 {
+			if !r.seen {
+				firstSeen[r.gid]++
+			}
+		} else if r.seen {
+			t.Errorf("unique gid %d reported as already seen", r.gid)
+		}
+	}
+	for gid := int64(0); gid < overlapGids; gid++ {
+		if firstSeen[gid] != 1 {
+			t.Errorf("overlapping gid %d recorded %d times, want exactly 1", gid, firstSeen[gid])
+		}
+	}
+
+	c.mu.Lock()
+	size := len(c.items)
+	c.mu.Unlock()
+	wantSize := overlapGids + goroutines*uniquePerGid
+	if size != wantSize {
+		t.Fatalf("cache size = %d, want %d", size, wantSize)
+	}
+	if size > c.max {
+		t.Fatalf("cache size %d exceeds max %d", size, c.max)
 	}
 }
