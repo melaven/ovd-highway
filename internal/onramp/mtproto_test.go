@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -205,5 +206,66 @@ func TestHandleMessageDropMetrics(t *testing.T) {
 	}
 	if got := prometheusCounter(t, "ovd_tg_album_duplicates_dropped_total"); got != dupBefore+1 {
 		t.Fatalf("album dup counter = %d, want %d", got, dupBefore+1)
+	}
+}
+
+func TestGroupedSeenCacheConcurrent(t *testing.T) {
+	const (
+		goroutines   = 8
+		overlapGids  = 10
+		uniquePerGid = 20
+	)
+	c := newGroupedSeenCache(time.Hour, 4096)
+
+	type result struct {
+		gid int64
+		seen bool
+	}
+	results := make(chan result, goroutines*(overlapGids+uniquePerGid))
+	now := time.Now()
+
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < overlapGids; i++ {
+				gid := int64(i)
+				results <- result{gid, c.checkAndRecord(gid, now)}
+			}
+			for i := 0; i < uniquePerGid; i++ {
+				gid := int64(10000 + g*uniquePerGid + i)
+				results <- result{gid, c.checkAndRecord(gid, now)}
+			}
+		}(g)
+	}
+	wg.Wait()
+	close(results)
+
+	firstSeen := make(map[int64]int)
+	for r := range results {
+		if r.gid < 10000 {
+			if !r.seen {
+				firstSeen[r.gid]++
+			}
+		} else if r.seen {
+			t.Errorf("unique gid %d reported as already seen", r.gid)
+		}
+	}
+	for gid := int64(0); gid < overlapGids; gid++ {
+		if firstSeen[gid] != 1 {
+			t.Errorf("overlapping gid %d recorded %d times, want exactly 1", gid, firstSeen[gid])
+		}
+	}
+
+	c.mu.Lock()
+	size := len(c.items)
+	c.mu.Unlock()
+	wantSize := overlapGids + goroutines*uniquePerGid
+	if size != wantSize {
+		t.Fatalf("cache size = %d, want %d", size, wantSize)
+	}
+	if size > c.max {
+		t.Fatalf("cache size %d exceeds max %d", size, c.max)
 	}
 }
