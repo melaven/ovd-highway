@@ -18,38 +18,45 @@ export default function DLQBadge({ hasToken }: DLQBadgeProps) {
   const [data, setData] = useState<DLQList | null>(null);
   const [open, setOpen] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const mounted = useRef(true);
-
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
 
   const refresh = useCallback(async () => {
     const r = await listDLQ();
     if (!mounted.current) return;
+    // Offline/5xx results keep the last known count instead of flickering.
     if (r.ok) setData(r.data ?? { count: 0, items: [] });
   }, []);
 
   useEffect(() => {
+    mounted.current = true;
     if (!hasToken) {
-      setData(null);
-      setOpen(false);
-      return;
+      return () => {
+        mounted.current = false;
+      };
     }
-    void refresh();
-    const id = window.setInterval(() => void refresh(), POLL_MS);
-    return () => window.clearInterval(id);
+    const tick = () => void refresh();
+    const start = window.setTimeout(tick, 0);
+    const id = window.setInterval(tick, POLL_MS);
+    return () => {
+      mounted.current = false;
+      window.clearTimeout(start);
+      window.clearInterval(id);
+    };
   }, [hasToken, refresh]);
 
   const handleRetry = async () => {
     if (retrying) return;
     setRetrying(true);
+    setNotice(null);
     const r = await retryDLQ();
-    if (mounted.current) setRetrying(false);
-    if (r.ok) await refresh();
+    if (!mounted.current) return;
+    setRetrying(false);
+    if (r.ok) {
+      await refresh();
+    } else {
+      setNotice(r.message || 'Retry failed');
+    }
   };
 
   if (!hasToken) return null;
@@ -101,6 +108,12 @@ export default function DLQBadge({ hasToken }: DLQBadgeProps) {
               Retry all
             </button>
           </div>
+
+          {notice && (
+            <p className="px-3 py-1.5 font-sans text-[10px] text-amber-300/80 border-b border-[var(--glass-border)]">
+              {notice}
+            </p>
+          )}
 
           <div className="overflow-y-auto">
             {!data || data.items.length === 0 ? (
