@@ -19,9 +19,11 @@ type fakeDLQAdmin struct {
 	listErr  error
 	countErr error
 	retryErr error
+	gotLimit int
 }
 
-func (f *fakeDLQAdmin) List(context.Context, int) ([]dlq.DLQItem, error) {
+func (f *fakeDLQAdmin) List(_ context.Context, limit int) ([]dlq.DLQItem, error) {
+	f.gotLimit = limit
 	return f.items, f.listErr
 }
 
@@ -57,6 +59,36 @@ func TestListDLQReturnsCountAndItems(t *testing.T) {
 	}
 	if body.Items[0].ID != "a" || body.Items[0].Attempts != 1 {
 		t.Fatalf("unexpected item: %+v", body.Items[0])
+	}
+}
+
+func TestListDLQLimitParam(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want int
+	}{
+		{"no param defaults to 50", "/api/v1/dlq", 50},
+		{"valid limit", "/api/v1/dlq?limit=10", 10},
+		{"above max clamps to 100", "/api/v1/dlq?limit=999", 100},
+		{"non-numeric falls back to 50", "/api/v1/dlq?limit=abc", 50},
+		{"non-positive falls back to 50", "/api/v1/dlq?limit=0", 50},
+		{"negative falls back to 50", "/api/v1/dlq?limit=-5", 50},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := newTestEnv(t)
+			admin := &fakeDLQAdmin{}
+			env.handler.SetDLQAdmin(admin)
+
+			rec := do(t, env, http.MethodGet, tt.path, "")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			if admin.gotLimit != tt.want {
+				t.Fatalf("List limit = %d, want %d", admin.gotLimit, tt.want)
+			}
+		})
 	}
 }
 
