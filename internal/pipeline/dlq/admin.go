@@ -62,7 +62,7 @@ func (s *PostgresRetryStore) List(ctx context.Context, limit int) ([]DLQItem, er
 	}
 	defer rows.Close()
 
-	var out []DLQItem
+	out := []DLQItem{}
 	for rows.Next() {
 		var it DLQItem
 		if err := rows.Scan(&it.ID, &it.Source, &it.Error, &it.Attempts, &it.CreatedAt, &it.PayloadPreview); err != nil {
